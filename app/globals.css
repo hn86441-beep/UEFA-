@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: "Teko", "Cairo", sans-serif;
+  --font-body: "Cairo", sans-serif;
+}
+
+html, body {
+  background: #04060d;
+  color: #eef1fb;
+  font-family: var(--font-body);
+  min-height: 100%;
+}
+
+* { box-sizing: border-box; }
+
+.stadium-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 120% 60% at 50% -10%, rgba(212,175,55,0.10), transparent 55%),
+    linear-gradient(180deg, #05070f 0%, #070b1a 45%, #04060d 100%);
+}
+
+.floodlight {
+  position: absolute;
+  width: 60vw;
+  height: 60vw;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.16;
+}
+.fl1 { top: -20vw; left: -10vw; background: #d4af37; }
+.fl2 { top: 10vw; right: -20vw; background: #6f2bd6; }
+
+.pitch-lines {
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(180deg, rgba(255,255,255,0.02) 0 1px, transparent 1px 90px);
+  opacity: 0.6;
+}
+
+.font-display { font-family: var(--font-display); letter-spacing: 0.02em; }
+.crest-star { filter: drop-shadow(0 0 12px rgba(212,175,55,0.55)); }
+
+.glass-card {
+  background: linear-gradient(180deg, rgba(20,28,64,0.55), rgba(9,13,30,0.55));
+  border: 1px solid rgba(212,175,55,0.18);
+  backdrop-filter: blur(6px);
+}
+
+.gold-text {
+  background: linear-gradient(180deg, #f6e2a0, #d4af37 60%, #a9812a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+table { border-collapse: collapse; }
