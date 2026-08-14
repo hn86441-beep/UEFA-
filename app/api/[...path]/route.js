@@ -37,7 +37,15 @@ async function requireAuth(req, seg) {
 }
 
 /* =========================== GET =========================== */
-export async function GET(req, { params }) {
+export async function GET(req, ctx) {
+  try {
+    return await handleGET(req, ctx);
+  } catch (e) {
+    return fail(e.message || "حدث خطأ غير متوقع في الخادم", 500);
+  }
+}
+
+async function handleGET(req, { params }) {
   const p = params.path || [];
   const seg = p.join("/");
 
@@ -52,7 +60,15 @@ export async function GET(req, { params }) {
 }
 
 /* =========================== POST =========================== */
-export async function POST(req, { params }) {
+export async function POST(req, ctx) {
+  try {
+    return await handlePOST(req, ctx);
+  } catch (e) {
+    return fail(e.message || "حدث خطأ غير متوقع في الخادم", 500);
+  }
+}
+
+async function handlePOST(req, { params }) {
   const p = params.path || [];
   const seg = p.join("/");
   const authFail = await requireAuth(req, seg);
@@ -193,7 +209,15 @@ export async function POST(req, { params }) {
 }
 
 /* =========================== PUT =========================== */
-export async function PUT(req, { params }) {
+export async function PUT(req, ctx) {
+  try {
+    return await handlePUT(req, ctx);
+  } catch (e) {
+    return fail(e.message || "حدث خطأ غير متوقع في الخادم", 500);
+  }
+}
+
+async function handlePUT(req, { params }) {
   const p = params.path || [];
   const authFail = await requireAuth(req, p.join("/"));
   if (authFail) return authFail;
@@ -241,7 +265,15 @@ export async function PUT(req, { params }) {
 }
 
 /* =========================== DELETE =========================== */
-export async function DELETE(req, { params }) {
+export async function DELETE(req, ctx) {
+  try {
+    return await handleDELETE(req, ctx);
+  } catch (e) {
+    return fail(e.message || "حدث خطأ غير متوقع في الخادم", 500);
+  }
+}
+
+async function handleDELETE(req, { params }) {
   const p = params.path || [];
   const authFail = await requireAuth(req, p.join("/"));
   if (authFail) return authFail;
