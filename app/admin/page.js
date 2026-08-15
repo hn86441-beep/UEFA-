@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Nav from "../../components/Nav";
 import { useLeagueData, callApi } from "../../lib/useLeagueData";
-import { computeStandings } from "../../lib/logic";
+import { computeStandings, computeTopScorers } from "../../lib/logic";
 
 export default function AdminPage() {
   const [authState, setAuthState] = useState("checking"); // checking | out | in
@@ -93,6 +93,7 @@ const TABS = [
   { id: "groups", label: "المجموعات والقرعة" },
   { id: "matches", label: "مباريات المجموعات" },
   { id: "knockout", label: "خروج المغلوب" },
+  { id: "awards", label: "الهدافون والجوائز" },
 ];
 
 function Dashboard({ onLoggedOut }) {
@@ -163,6 +164,7 @@ function Dashboard({ onLoggedOut }) {
         {tab === "groups" && <GroupsTab data={data} refresh={refresh} flash={flash} />}
         {tab === "matches" && <MatchesTab data={data} refresh={refresh} flash={flash} />}
         {tab === "knockout" && <KnockoutTab data={data} refresh={refresh} flash={flash} />}
+        {tab === "awards" && <AwardsTab data={data} refresh={refresh} flash={flash} />}
 
         <div className="mt-14 pt-6 border-t border-white/10">
           <button
@@ -451,6 +453,16 @@ function MatchesTab({ data, refresh, flash }) {
     }
   }
 
+  async function saveScorers(matchId, scorersA, scorersB) {
+    try {
+      await callApi(`/api/matches/${matchId}`, "PUT", { scorersA, scorersB });
+      await refresh();
+      flash("تم حفظ الهدافين");
+    } catch (e) {
+      flash(e.message, true);
+    }
+  }
+
   async function deleteMatch(id) {
     if (!confirm("حذف هذه المباراة؟")) return;
     try {
@@ -509,7 +521,7 @@ function MatchesTab({ data, refresh, flash }) {
                 <p className="text-white/30 text-sm">لا مباريات في هذه المجموعة.</p>
               ) : (
                 matches.map((m) => (
-                  <MatchRow key={m.id} match={m} teamA={teamById[m.teamA]} teamB={teamById[m.teamB]} onSave={saveScore} onDelete={deleteMatch} />
+                  <MatchRow key={m.id} match={m} teamA={teamById[m.teamA]} teamB={teamById[m.teamB]} onSave={saveScore} onDelete={deleteMatch} onSaveScorers={saveScorers} />
                 ))
               )}
             </div>
@@ -520,17 +532,93 @@ function MatchesTab({ data, refresh, flash }) {
   );
 }
 
-function MatchRow({ match, teamA, teamB, onSave, onDelete }) {
+function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveScorers }) {
   const [a, setA] = useState(match.scoreA ?? "");
   const [b, setB] = useState(match.scoreB ?? "");
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-white/10 px-3 py-2 text-sm">
-      <span className="flex-1 truncate">{teamA?.name || "—"}</span>
-      <input type="number" value={a} onChange={(e) => setA(e.target.value)} onBlur={() => onSave(match, a, b)} className="w-14 text-center bg-black/20 border border-white/10 rounded px-1 py-1 outline-none focus:border-gold/50" />
-      <span className="text-white/30">–</span>
-      <input type="number" value={b} onChange={(e) => setB(e.target.value)} onBlur={() => onSave(match, a, b)} className="w-14 text-center bg-black/20 border border-white/10 rounded px-1 py-1 outline-none focus:border-gold/50" />
-      <span className="flex-1 truncate text-left">{teamB?.name || "—"}</span>
-      <button onClick={() => onDelete(match.id)} className="text-red-400/60 hover:text-red-400 text-xs">حذف</button>
+    <div className="rounded-lg border border-white/10 px-3 py-2 text-sm">
+      <div className="flex items-center gap-3">
+        <span className="flex-1 truncate">{teamA?.name || "—"}</span>
+        <input type="number" value={a} onChange={(e) => setA(e.target.value)} onBlur={() => onSave(match, a, b)} className="w-14 text-center bg-black/20 border border-white/10 rounded px-1 py-1 outline-none focus:border-gold/50" />
+        <span className="text-white/30">–</span>
+        <input type="number" value={b} onChange={(e) => setB(e.target.value)} onBlur={() => onSave(match, a, b)} className="w-14 text-center bg-black/20 border border-white/10 rounded px-1 py-1 outline-none focus:border-gold/50" />
+        <span className="flex-1 truncate text-left">{teamB?.name || "—"}</span>
+        <button onClick={() => onDelete(match.id)} className="text-red-400/60 hover:text-red-400 text-xs">حذف</button>
+      </div>
+      {onSaveScorers && (
+        <ScorersPanel match={match} teamA={teamA} teamB={teamB} onSaveScorers={onSaveScorers} />
+      )}
+    </div>
+  );
+}
+
+/* ---------------- تسجيل الهدافين (مشترك بين المجموعات وخروج المغلوب) ---------------- */
+function ScorersPanel({ match, teamA, teamB, onSaveScorers }) {
+  const [open, setOpen] = useState(false);
+  const [scorersA, setScorersA] = useState(match.scorersA || []);
+  const [scorersB, setScorersB] = useState(match.scorersB || []);
+
+  function addRow(side) {
+    if (side === "A") setScorersA([...scorersA, { name: "", goals: 1 }]);
+    else setScorersB([...scorersB, { name: "", goals: 1 }]);
+  }
+  function updateRow(side, idx, patch) {
+    const list = [...(side === "A" ? scorersA : scorersB)];
+    list[idx] = { ...list[idx], ...patch };
+    if (side === "A") setScorersA(list);
+    else setScorersB(list);
+  }
+  function removeRow(side, idx) {
+    const list = (side === "A" ? scorersA : scorersB).filter((_, i) => i !== idx);
+    if (side === "A") setScorersA(list);
+    else setScorersB(list);
+  }
+  function save() {
+    onSaveScorers(
+      match.id,
+      scorersA.filter((s) => s.name?.trim()),
+      scorersB.filter((s) => s.name?.trim())
+    );
+  }
+
+  const totalGoals =
+    (match.scorersA || []).reduce((s, x) => s + (Number(x.goals) || 0), 0) +
+    (match.scorersB || []).reduce((s, x) => s + (Number(x.goals) || 0), 0);
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="text-[11px] text-gold2/70 hover:text-gold2 mt-1.5">
+        ⚽ تسجيل الهدافين {totalGoals > 0 ? `(${totalGoals} هدف مسجّل)` : ""}
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-2 grid sm:grid-cols-2 gap-3 bg-black/20 rounded-lg p-3">
+      <ScorerSide label={teamA?.name} rows={scorersA} onAdd={() => addRow("A")} onChange={(i, p) => updateRow("A", i, p)} onRemove={(i) => removeRow("A", i)} />
+      <ScorerSide label={teamB?.name} rows={scorersB} onAdd={() => addRow("B")} onChange={(i, p) => updateRow("B", i, p)} onRemove={(i) => removeRow("B", i)} />
+      <div className="sm:col-span-2 flex justify-end gap-2">
+        <button onClick={() => setOpen(false)} className="text-xs px-3 py-1.5 rounded border border-white/15 text-white/60 hover:bg-white/5">إغلاق</button>
+        <button onClick={() => { save(); setOpen(false); }} className="text-xs px-3 py-1.5 rounded bg-gold/90 text-black font-semibold hover:bg-gold2">حفظ الهدافين</button>
+      </div>
+    </div>
+  );
+}
+
+function ScorerSide({ label, rows, onAdd, onChange, onRemove }) {
+  return (
+    <div>
+      <p className="text-xs text-white/50 mb-1">{label}</p>
+      <div className="space-y-1">
+        {rows.map((s, i) => (
+          <div key={i} className="flex items-center gap-1">
+            <input value={s.name} onChange={(e) => onChange(i, { name: e.target.value })} placeholder="اسم اللاعب" className="flex-1 bg-black/30 border border-white/10 rounded px-2 py-1 text-xs outline-none focus:border-gold/50" />
+            <input type="number" min="1" value={s.goals} onChange={(e) => onChange(i, { goals: Number(e.target.value) })} className="w-12 text-center bg-black/30 border border-white/10 rounded px-1 py-1 text-xs outline-none focus:border-gold/50" />
+            <button onClick={() => onRemove(i)} className="text-red-400/60 hover:text-red-400 text-xs">×</button>
+          </div>
+        ))}
+      </div>
+      <button onClick={onAdd} className="text-[11px] text-gold2/70 hover:text-gold2 mt-1">+ إضافة هداف</button>
     </div>
   );
 }
@@ -580,6 +668,16 @@ function KnockoutTab({ data, refresh, flash }) {
     try {
       await callApi(`/api/matches/${m.id}`, "PUT", { winner: winnerId });
       await refresh();
+    } catch (e) {
+      flash(e.message, true);
+    }
+  }
+
+  async function saveScorers(matchId, scorersA, scorersB) {
+    try {
+      await callApi(`/api/matches/${matchId}`, "PUT", { scorersA, scorersB });
+      await refresh();
+      flash("تم حفظ الهدافين");
     } catch (e) {
       flash(e.message, true);
     }
@@ -640,6 +738,7 @@ function KnockoutTab({ data, refresh, flash }) {
                       </div>
                     )}
                     {m.winner && !isTie && <p className="mt-1 text-xs text-green-300/70">المتأهل: {teamById[m.winner]?.name}</p>}
+                    <ScorersPanel match={m} teamA={teamById[m.teamA]} teamB={teamById[m.teamB]} onSaveScorers={saveScorers} />
                   </div>
                 );
               })}
@@ -666,5 +765,86 @@ function ScoreInput({ match, side, onSave }) {
       }}
       className="w-14 text-center bg-black/20 border border-white/10 rounded px-1 py-1 outline-none focus:border-gold/50"
     />
+  );
+}
+
+/* ---------------- الهدافون والجوائز الفردية ---------------- */
+function AwardsTab({ data, refresh, flash }) {
+  const scorers = computeTopScorers(data.teams, data.matches);
+  const awards = data.settings?.awards || {};
+  const [bestPlayer, setBestPlayer] = useState(awards.bestPlayer || "");
+  const [bestGoalkeeper, setBestGoalkeeper] = useState(awards.bestGoalkeeper || "");
+  const [bestYoungPlayer, setBestYoungPlayer] = useState(awards.bestYoungPlayer || "");
+
+  async function saveAwards() {
+    try {
+      await callApi("/api/data", "PUT", {
+        awards: { bestPlayer, bestGoalkeeper, bestYoungPlayer },
+      });
+      await refresh();
+      flash("تم حفظ الجوائز الفردية");
+    } catch (e) {
+      flash(e.message, true);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="glass-card rounded-2xl p-6">
+        <h2 className="font-display text-2xl text-gold2 mb-4">🏆 قائمة الهدافين</h2>
+        <p className="text-white/50 text-sm mb-4">
+          محسوبة تلقائيًا من الأهداف التي تسجّلها في تبويبي "مباريات المجموعات" و"خروج المغلوب"
+          عبر زر "تسجيل الهدافين" أسفل كل مباراة.
+        </p>
+        {scorers.length === 0 ? (
+          <p className="text-white/40 text-sm">لم تُسجَّل أي أهداف بعد.</p>
+        ) : (
+          <table className="w-full text-sm max-w-lg">
+            <thead>
+              <tr className="text-white/40 text-xs">
+                <th className="text-right font-normal pb-2">#</th>
+                <th className="text-right font-normal pb-2">اللاعب</th>
+                <th className="text-right font-normal pb-2">الفريق</th>
+                <th className="pb-2">أهداف</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scorers.map((s, i) => (
+                <tr key={`${s.name}-${s.teamId}`} className="border-t border-white/5">
+                  <td className="py-2 text-white/40">{i + 1}</td>
+                  <td className="py-2 font-semibold">{s.name}</td>
+                  <td className="py-2 text-white/60">{s.teamName}</td>
+                  <td className="py-2 text-center font-display text-lg text-gold2">{s.goals}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="glass-card rounded-2xl p-6 max-w-lg">
+        <h2 className="font-display text-2xl text-gold2 mb-4">🎖️ الجوائز الفردية</h2>
+        <p className="text-white/50 text-sm mb-4">
+          جوائز تُمنح يدويًا بقرارك (لا تُحسب تلقائيًا) — مثل جوائز نهاية الموسم.
+        </p>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-white/60 mb-1">أفضل لاعب في الدوري</label>
+            <input value={bestPlayer} onChange={(e) => setBestPlayer(e.target.value)} placeholder="اسم اللاعب" className="w-full rounded-lg bg-black/30 border border-white/10 px-4 py-2.5 outline-none focus:border-gold/50" />
+          </div>
+          <div>
+            <label className="block text-sm text-white/60 mb-1">أفضل حارس مرمى</label>
+            <input value={bestGoalkeeper} onChange={(e) => setBestGoalkeeper(e.target.value)} placeholder="اسم الحارس" className="w-full rounded-lg bg-black/30 border border-white/10 px-4 py-2.5 outline-none focus:border-gold/50" />
+          </div>
+          <div>
+            <label className="block text-sm text-white/60 mb-1">أفضل لاعب شاب</label>
+            <input value={bestYoungPlayer} onChange={(e) => setBestYoungPlayer(e.target.value)} placeholder="اسم اللاعب" className="w-full rounded-lg bg-black/30 border border-white/10 px-4 py-2.5 outline-none focus:border-gold/50" />
+          </div>
+          <button onClick={saveAwards} className="px-5 py-2.5 rounded-lg bg-gold/90 text-black font-semibold hover:bg-gold2 transition">
+            حفظ الجوائز
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
