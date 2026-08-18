@@ -296,21 +296,24 @@ function AwardsView({ teams, matches, settings }) {
           <p className="text-white/40 text-sm">لا توجد أهداف مسجّلة بعد.</p>
         ) : (
           <div className="space-y-2">
-            {scorers.slice(0, 10).map((s, i) => (
-              <div
-                key={`${s.name}-${s.teamId}`}
-                className={`flex items-center gap-3 rounded-lg px-4 py-2.5 ${
-                  i === 0 ? "border border-gold/50 bg-gold/5" : "border border-white/5"
-                }`}
-              >
-                <span className={`w-6 text-center font-display text-lg ${i === 0 ? "text-gold2" : "text-white/40"}`}>
-                  {i + 1}
-                </span>
-                <span className="flex-1 font-semibold">{s.name}</span>
-                <span className="text-white/50 text-sm">{s.teamName}</span>
-                <span className="font-display text-xl text-gold2 w-10 text-center">{s.goals}</span>
-              </div>
-            ))}
+            {scorers.slice(0, 10).map((s, i) => {
+              const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : null;
+              return (
+                <div
+                  key={`${s.playerId || s.name}-${s.teamId}`}
+                  className={`flex items-center gap-3 rounded-lg px-4 py-2.5 ${
+                    i === 0 ? "border border-gold/50 bg-gold/5" : "border border-white/5"
+                  }`}
+                >
+                  <span className={`w-7 text-center ${medal ? "text-lg" : "font-display text-lg text-white/40"}`}>
+                    {medal || i + 1}
+                  </span>
+                  <span className="flex-1 font-semibold">{s.name}</span>
+                  <span className="text-white/50 text-sm">{s.teamName}</span>
+                  <span className="font-display text-xl text-gold2 w-10 text-center">{s.goals}</span>
+                </div>
+              );
+            })}
           </div>
         )}
       </section>
