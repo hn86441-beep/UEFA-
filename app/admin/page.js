@@ -90,6 +90,7 @@ function LoginView({ onLoggedIn }) {
 const TABS = [
   { id: "settings", label: "الإعدادات" },
   { id: "teams", label: "الفرق" },
+  { id: "players", label: "اللاعبون" },
   { id: "groups", label: "المجموعات والقرعة" },
   { id: "matches", label: "مباريات المجموعات" },
   { id: "knockout", label: "خروج المغلوب" },
@@ -161,6 +162,7 @@ function Dashboard({ onLoggedOut }) {
 
         {tab === "settings" && <SettingsTab data={data} refresh={refresh} flash={flash} />}
         {tab === "teams" && <TeamsTab data={data} refresh={refresh} flash={flash} />}
+        {tab === "players" && <PlayersTab data={data} refresh={refresh} flash={flash} />}
         {tab === "groups" && <GroupsTab data={data} refresh={refresh} flash={flash} />}
         {tab === "matches" && <MatchesTab data={data} refresh={refresh} flash={flash} />}
         {tab === "knockout" && <KnockoutTab data={data} refresh={refresh} flash={flash} />}
@@ -558,9 +560,13 @@ function ScorersPanel({ match, teamA, teamB, onSaveScorers }) {
   const [scorersA, setScorersA] = useState(match.scorersA || []);
   const [scorersB, setScorersB] = useState(match.scorersB || []);
 
+  const playersA = teamA?.players || [];
+  const playersB = teamB?.players || [];
+
   function addRow(side) {
-    if (side === "A") setScorersA([...scorersA, { name: "", goals: 1 }]);
-    else setScorersB([...scorersB, { name: "", goals: 1 }]);
+    const firstId = (side === "A" ? playersA : playersB)[0]?.id || "";
+    if (side === "A") setScorersA([...scorersA, { playerId: firstId, goals: 1 }]);
+    else setScorersB([...scorersB, { playerId: firstId, goals: 1 }]);
   }
   function updateRow(side, idx, patch) {
     const list = [...(side === "A" ? scorersA : scorersB)];
@@ -576,8 +582,8 @@ function ScorersPanel({ match, teamA, teamB, onSaveScorers }) {
   function save() {
     onSaveScorers(
       match.id,
-      scorersA.filter((s) => s.name?.trim()),
-      scorersB.filter((s) => s.name?.trim())
+      scorersA.filter((s) => s.playerId),
+      scorersB.filter((s) => s.playerId)
     );
   }
 
@@ -595,8 +601,8 @@ function ScorersPanel({ match, teamA, teamB, onSaveScorers }) {
 
   return (
     <div className="mt-2 grid sm:grid-cols-2 gap-3 bg-black/20 rounded-lg p-3">
-      <ScorerSide label={teamA?.name} rows={scorersA} onAdd={() => addRow("A")} onChange={(i, p) => updateRow("A", i, p)} onRemove={(i) => removeRow("A", i)} />
-      <ScorerSide label={teamB?.name} rows={scorersB} onAdd={() => addRow("B")} onChange={(i, p) => updateRow("B", i, p)} onRemove={(i) => removeRow("B", i)} />
+      <ScorerSide label={teamA?.name} players={playersA} rows={scorersA} onAdd={() => addRow("A")} onChange={(i, p) => updateRow("A", i, p)} onRemove={(i) => removeRow("A", i)} />
+      <ScorerSide label={teamB?.name} players={playersB} rows={scorersB} onAdd={() => addRow("B")} onChange={(i, p) => updateRow("B", i, p)} onRemove={(i) => removeRow("B", i)} />
       <div className="sm:col-span-2 flex justify-end gap-2">
         <button onClick={() => setOpen(false)} className="text-xs px-3 py-1.5 rounded border border-white/15 text-white/60 hover:bg-white/5">إغلاق</button>
         <button onClick={() => { save(); setOpen(false); }} className="text-xs px-3 py-1.5 rounded bg-gold/90 text-black font-semibold hover:bg-gold2">حفظ الهدافين</button>
@@ -605,14 +611,32 @@ function ScorersPanel({ match, teamA, teamB, onSaveScorers }) {
   );
 }
 
-function ScorerSide({ label, rows, onAdd, onChange, onRemove }) {
+function ScorerSide({ label, players, rows, onAdd, onChange, onRemove }) {
+  if (players.length === 0) {
+    return (
+      <div>
+        <p className="text-xs text-white/50 mb-1">{label}</p>
+        <p className="text-[11px] text-white/30">
+          لا لاعبون مسجّلون لهذا الفريق — سجّلهم أولًا من تبويب "اللاعبون".
+        </p>
+      </div>
+    );
+  }
   return (
     <div>
       <p className="text-xs text-white/50 mb-1">{label}</p>
       <div className="space-y-1">
         {rows.map((s, i) => (
           <div key={i} className="flex items-center gap-1">
-            <input value={s.name} onChange={(e) => onChange(i, { name: e.target.value })} placeholder="اسم اللاعب" className="flex-1 bg-black/30 border border-white/10 rounded px-2 py-1 text-xs outline-none focus:border-gold/50" />
+            <select
+              value={s.playerId}
+              onChange={(e) => onChange(i, { playerId: e.target.value })}
+              className="flex-1 bg-black/30 border border-white/10 rounded px-2 py-1 text-xs outline-none focus:border-gold/50"
+            >
+              {players.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
             <input type="number" min="1" value={s.goals} onChange={(e) => onChange(i, { goals: Number(e.target.value) })} className="w-12 text-center bg-black/30 border border-white/10 rounded px-1 py-1 text-xs outline-none focus:border-gold/50" />
             <button onClick={() => onRemove(i)} className="text-red-400/60 hover:text-red-400 text-xs">×</button>
           </div>
@@ -768,6 +792,106 @@ function ScoreInput({ match, side, onSave }) {
   );
 }
 
+/* ---------------- اللاعبون ---------------- */
+function PlayersTab({ data, refresh, flash }) {
+  const scorers = computeTopScorers(data.teams, data.matches);
+  const goalsByPlayerId = Object.fromEntries(
+    scorers.filter((s) => s.playerId).map((s) => [s.playerId, s.goals])
+  );
+
+  async function addPlayer(teamId, name, clearInput) {
+    if (!name?.trim()) return;
+    try {
+      await callApi("/api/players", "POST", { teamId, name });
+      clearInput();
+      await refresh();
+      flash("تمت إضافة اللاعب");
+    } catch (e) {
+      flash(e.message, true);
+    }
+  }
+
+  async function removePlayer(teamId, playerId) {
+    if (!confirm("حذف هذا اللاعب من القائمة؟")) return;
+    try {
+      await callApi(`/api/players/${teamId}/${playerId}`, "DELETE");
+      await refresh();
+      flash("تم حذف اللاعب");
+    } catch (e) {
+      flash(e.message, true);
+    }
+  }
+
+  if (data.teams.length === 0) {
+    return <div className="glass-card rounded-2xl p-8 text-center text-white/50">أضف فرقًا أولًا من تبويب "الفرق" حتى تستطيع تسجيل لاعبيها.</div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      <p className="text-white/50 text-sm">
+        سجّل هنا أسماء لاعبي كل فريق مرة واحدة — بعدها يمكنك اختيارهم مباشرة عند تسجيل
+        الهدافين في أي مباراة، وستُحسب أهدافهم تلقائيًا في قائمة الهدافين.
+      </p>
+      <div className="grid sm:grid-cols-2 gap-4">
+        {data.teams.map((t) => (
+          <TeamPlayersCard
+            key={t.id}
+            team={t}
+            goalsByPlayerId={goalsByPlayerId}
+            onAdd={addPlayer}
+            onRemove={removePlayer}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TeamPlayersCard({ team, goalsByPlayerId, onAdd, onRemove }) {
+  const [name, setName] = useState("");
+  return (
+    <div className="glass-card rounded-2xl p-5">
+      <h3 className="font-display text-xl text-gold2 mb-3">{team.name}</h3>
+      {(team.players || []).length === 0 ? (
+        <p className="text-white/30 text-xs mb-3">لا لاعبون مسجّلون بعد.</p>
+      ) : (
+        <ul className="space-y-1.5 mb-3">
+          {team.players.map((p) => (
+            <li key={p.id} className="flex items-center justify-between text-sm rounded-lg border border-white/10 px-3 py-1.5">
+              <span>{p.name}</span>
+              <span className="flex items-center gap-2">
+                {goalsByPlayerId[p.id] > 0 && (
+                  <span className="text-xs text-gold2 font-display text-base">⚽ {goalsByPlayerId[p.id]}</span>
+                )}
+                <button onClick={() => onRemove(team.id, p.id)} className="text-red-400/60 hover:text-red-400 text-xs">حذف</button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-2">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              onAdd(team.id, name, () => setName(""));
+            }
+          }}
+          placeholder="اسم لاعب جديد"
+          className="flex-1 rounded-lg bg-black/30 border border-white/10 px-3 py-2 text-sm outline-none focus:border-gold/50"
+        />
+        <button
+          onClick={() => onAdd(team.id, name, () => setName(""))}
+          className="px-3 py-2 rounded-lg bg-gold/90 text-black text-sm font-semibold hover:bg-gold2 transition"
+        >
+          إضافة
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- الهدافون والجوائز الفردية ---------------- */
 function AwardsTab({ data, refresh, flash }) {
   const scorers = computeTopScorers(data.teams, data.matches);
@@ -810,7 +934,7 @@ function AwardsTab({ data, refresh, flash }) {
             </thead>
             <tbody>
               {scorers.map((s, i) => (
-                <tr key={`${s.name}-${s.teamId}`} className="border-t border-white/5">
+                <tr key={`${s.playerId || s.name}-${s.teamId}`} className="border-t border-white/5">
                   <td className="py-2 text-white/40">{i + 1}</td>
                   <td className="py-2 font-semibold">{s.name}</td>
                   <td className="py-2 text-white/60">{s.teamName}</td>
