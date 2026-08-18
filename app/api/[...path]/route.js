@@ -77,7 +77,13 @@ async function handlePOST(req, { params }) {
 
   // ---- تسجيل الدخول / الخروج ----
   if (seg === "auth/login") {
-    const adminPassword = process.env.ADMIN_PASSWORD || "change_me_123";
+    const adminPassword = process.env.ADMIN_PASSWORD;
+    if (!adminPassword) {
+      return fail(
+        "لم يُحدَّد المشرف كلمة سر بعد. من إعدادات Vercel أضف متغير ADMIN_PASSWORD ثم أعد النشر.",
+        500
+      );
+    }
     if (!body.password || body.password !== adminPassword) {
       return fail("كلمة السر غير صحيحة", 401);
     }
@@ -107,10 +113,25 @@ async function handlePOST(req, { params }) {
       gf: 0,
       ga: 0,
       points: 0,
+      players: [],
     };
     data.teams.push(team);
     await saveData(data);
     return ok(team, { status: 201 });
+  }
+
+  // ---- إضافة لاعب لقائمة فريق ----
+  if (seg === "players") {
+    const { teamId, name } = body;
+    if (!name?.trim()) return fail("اسم اللاعب مطلوب");
+    const data = await getData();
+    const team = data.teams.find((t) => t.id === teamId);
+    if (!team) return fail("الفريق غير موجود", 404);
+    if (!team.players) team.players = [];
+    const player = { id: uid("p"), name: name.trim() };
+    team.players.push(player);
+    await saveData(data);
+    return ok(player, { status: 201 });
   }
 
   // ---- إضافة مجموعة ----
@@ -140,6 +161,8 @@ async function handlePOST(req, { params }) {
       played: false,
       date,
       winner: null,
+      scorersA: [],
+      scorersB: [],
     };
     data.matches.push(match);
     await saveData(data);
@@ -233,7 +256,7 @@ async function handlePUT(req, { params }) {
   if (p[0] === "teams" && p.length === 2) {
     const t = data.teams.find((t) => t.id === p[1]);
     if (!t) return fail("الفريق غير موجود", 404);
-    const allowed = ["name", "group", "logo", "played", "won", "drawn", "lost", "gf", "ga", "points"];
+    const allowed = ["name", "group", "logo", "played", "won", "drawn", "lost", "gf", "ga", "points", "players"];
     allowed.forEach((k) => { if (k in body) t[k] = body[k]; });
     await saveData(data);
     return ok(t);
@@ -250,12 +273,23 @@ async function handlePUT(req, { params }) {
   if (p[0] === "matches" && p.length === 2) {
     const m = data.matches.find((m) => m.id === p[1]);
     if (!m) return fail("المباراة غير موجودة", 404);
-    ["scoreA", "scoreB", "played", "date", "round", "winner"].forEach((k) => {
+    ["scoreA", "scoreB", "played", "date", "round", "winner", "scorersA", "scorersB"].forEach((k) => {
       if (k in body) m[k] = body[k];
     });
     if (m.stage === "knockout" && m.played && m.scoreA !== null && m.scoreB !== null) {
       if (m.scoreA > m.scoreB) m.winner = m.teamA;
       else if (m.scoreB > m.scoreA) m.winner = m.teamB;
+    }
+    // تحديث فوري لنقاط الفرق في المجموعة فور حفظ النتيجة (بدون الحاجة لزر تحديث يدوي)
+    if (m.stage === "group" && m.group) {
+      const table = computeStandings(data.teams, data.matches, m.group);
+      table.forEach((row) => {
+        const t = data.teams.find((t) => t.id === row.id);
+        if (t) Object.assign(t, {
+          played: row.played, won: row.won, drawn: row.drawn,
+          lost: row.lost, gf: row.gf, ga: row.ga, points: row.points,
+        });
+      });
     }
     await saveData(data);
     return ok(m);
@@ -278,6 +312,14 @@ async function handleDELETE(req, { params }) {
   const authFail = await requireAuth(req, p.join("/"));
   if (authFail) return authFail;
   const data = await getData();
+
+  if (p[0] === "players" && p.length === 3) {
+    const team = data.teams.find((t) => t.id === p[1]);
+    if (!team) return fail("الفريق غير موجود", 404);
+    team.players = (team.players || []).filter((pl) => pl.id !== p[2]);
+    await saveData(data);
+    return ok({ ok: true });
+  }
 
   if (p[0] === "teams" && p.length === 2) {
     data.teams = data.teams.filter((t) => t.id !== p[1]);
