@@ -455,11 +455,21 @@ function MatchesTab({ data, refresh, flash }) {
     }
   }
 
-  async function saveScorers(matchId, scorersA, scorersB) {
+  async function saveEvents(matchId, events) {
     try {
-      await callApi(`/api/matches/${matchId}`, "PUT", { scorersA, scorersB });
+      await callApi(`/api/matches/${matchId}`, "PUT", { events });
       await refresh();
-      flash("تم حفظ الهدافين");
+      flash("تم حفظ أحداث المباراة");
+    } catch (e) {
+      flash(e.message, true);
+    }
+  }
+
+  async function saveNotes(matchId, notes) {
+    try {
+      await callApi(`/api/matches/${matchId}`, "PUT", { notes });
+      await refresh();
+      flash("تم حفظ الملاحظات");
     } catch (e) {
       flash(e.message, true);
     }
@@ -475,14 +485,30 @@ function MatchesTab({ data, refresh, flash }) {
     }
   }
 
+  async function addManualMatch(groupId, teamAId, teamBId, resetFn) {
+    if (!teamAId || !teamBId || teamAId === teamBId) {
+      flash("اختر فريقين مختلفين", true);
+      return;
+    }
+    try {
+      await callApi("/api/matches", "POST", { stage: "group", group: groupId, teamA: teamAId, teamB: teamBId });
+      resetFn();
+      await refresh();
+      flash("تمت إضافة المباراة يدويًا");
+    } catch (e) {
+      flash(e.message, true);
+    }
+  }
+
   if (data.groups.length === 0) {
-    return <div className="glass-card rounded-2xl p-8 text-center text-white/50">أنشئ مجموعات وأجرِ القرعة أولًا من تبويب "المجموعات والقرعة" حتى تظهر المباريات هنا.</div>;
+    return <div className="glass-card rounded-2xl p-8 text-center text-white/50">أنشئ مجموعات أولًا من تبويب "المجموعات والقرعة" حتى تستطيع إضافة مباريات لها.</div>;
   }
 
   return (
     <div className="space-y-6">
       {data.groups.map((g) => {
         const matches = groupMatches.filter((m) => m.group === g.id);
+        const groupTeams = data.teams.filter((t) => t.group === g.id);
         const table = computeStandings(data.teams, data.matches, g.id);
         return (
           <div key={g.id} className="glass-card rounded-2xl p-6">
@@ -515,18 +541,30 @@ function MatchesTab({ data, refresh, flash }) {
                 </tbody>
               </table>
               <p className="text-[11px] text-white/30 mt-2">
-                هذا الجدول محسوب تلقائيًا من نتائج المباريات أدناه فقط للعرض — للاعتماد عليه في جدول الفرق، اضغط "تحديث النقاط تلقائيًا" في تبويب الفرق.
+                يُحدَّث هذا الجدول فورًا فور حفظ نتيجة أي مباراة أدناه.
               </p>
             </div>
-            <div className="space-y-2">
+
+            <div className="space-y-2 mb-4">
               {matches.length === 0 ? (
-                <p className="text-white/30 text-sm">لا مباريات في هذه المجموعة.</p>
+                <p className="text-white/30 text-sm">لا مباريات في هذه المجموعة بعد.</p>
               ) : (
                 matches.map((m) => (
-                  <MatchRow key={m.id} match={m} teamA={teamById[m.teamA]} teamB={teamById[m.teamB]} onSave={saveScore} onDelete={deleteMatch} onSaveScorers={saveScorers} />
+                  <MatchRow
+                    key={m.id}
+                    match={m}
+                    teamA={teamById[m.teamA]}
+                    teamB={teamById[m.teamB]}
+                    onSave={saveScore}
+                    onDelete={deleteMatch}
+                    onSaveEvents={saveEvents}
+                    onSaveNotes={saveNotes}
+                  />
                 ))
               )}
             </div>
+
+            <ManualMatchForm teams={groupTeams} onAdd={(a, b, reset) => addManualMatch(g.id, a, b, reset)} />
           </div>
         );
       })}
@@ -534,7 +572,38 @@ function MatchesTab({ data, refresh, flash }) {
   );
 }
 
-function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveScorers }) {
+/* نموذج إضافة مباراة يدويًا داخل مجموعة (تحكم كامل، بدل الاعتماد فقط على القرعة) */
+function ManualMatchForm({ teams, onAdd }) {
+  const [a, setA] = useState("");
+  const [b, setB] = useState("");
+
+  if (teams.length < 2) {
+    return <p className="text-[11px] text-white/30">أضف فريقين على الأقل لهذه المجموعة لتتمكن من إضافة مباراة يدويًا.</p>;
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-white/10">
+      <span className="text-xs text-white/50">إضافة مباراة يدويًا:</span>
+      <select value={a} onChange={(e) => setA(e.target.value)} className="rounded-lg bg-black/30 border border-white/10 px-3 py-1.5 text-sm outline-none focus:border-gold/50">
+        <option value="">الفريق الأول</option>
+        {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+      </select>
+      <span className="text-white/30 text-sm">ضد</span>
+      <select value={b} onChange={(e) => setB(e.target.value)} className="rounded-lg bg-black/30 border border-white/10 px-3 py-1.5 text-sm outline-none focus:border-gold/50">
+        <option value="">الفريق الثاني</option>
+        {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+      </select>
+      <button
+        onClick={() => onAdd(a, b, () => { setA(""); setB(""); })}
+        className="px-3 py-1.5 rounded-lg bg-gold/90 text-black text-sm font-semibold hover:bg-gold2 transition"
+      >
+        إضافة المباراة
+      </button>
+    </div>
+  );
+}
+
+function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveEvents, onSaveNotes }) {
   const [a, setA] = useState(match.scoreA ?? "");
   const [b, setB] = useState(match.scoreB ?? "");
   return (
@@ -547,102 +616,118 @@ function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveScorers }) {
         <span className="flex-1 truncate text-left">{teamB?.name || "—"}</span>
         <button onClick={() => onDelete(match.id)} className="text-red-400/60 hover:text-red-400 text-xs">حذف</button>
       </div>
-      {onSaveScorers && (
-        <ScorersPanel match={match} teamA={teamA} teamB={teamB} onSaveScorers={onSaveScorers} />
+      {onSaveEvents && (
+        <MatchDetailsPanel match={match} teamA={teamA} teamB={teamB} onSaveEvents={onSaveEvents} onSaveNotes={onSaveNotes} />
       )}
     </div>
   );
 }
 
-/* ---------------- تسجيل الهدافين (مشترك بين المجموعات وخروج المغلوب) ---------------- */
-function ScorersPanel({ match, teamA, teamB, onSaveScorers }) {
+/* ---------------- تفاصيل المباراة: أهداف بالدقيقة + إنذارات + ملاحظات ---------------- */
+function MatchDetailsPanel({ match, teamA, teamB, onSaveEvents, onSaveNotes }) {
   const [open, setOpen] = useState(false);
-  const [scorersA, setScorersA] = useState(match.scorersA || []);
-  const [scorersB, setScorersB] = useState(match.scorersB || []);
+  const [events, setEvents] = useState(match.events || []);
+  const [notes, setNotes] = useState(match.notes || "");
 
   const playersA = teamA?.players || [];
   const playersB = teamB?.players || [];
 
-  function addRow(side) {
-    const firstId = (side === "A" ? playersA : playersB)[0]?.id || "";
-    if (side === "A") setScorersA([...scorersA, { playerId: firstId, goals: 1 }]);
-    else setScorersB([...scorersB, { playerId: firstId, goals: 1 }]);
+  function addEvent(side, type) {
+    const players = side === "A" ? playersA : playersB;
+    setEvents([...events, { id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, side, type, playerId: players[0]?.id || "", minute: "" }]);
   }
-  function updateRow(side, idx, patch) {
-    const list = [...(side === "A" ? scorersA : scorersB)];
+  function updateEvent(idx, patch) {
+    const list = [...events];
     list[idx] = { ...list[idx], ...patch };
-    if (side === "A") setScorersA(list);
-    else setScorersB(list);
+    setEvents(list);
   }
-  function removeRow(side, idx) {
-    const list = (side === "A" ? scorersA : scorersB).filter((_, i) => i !== idx);
-    if (side === "A") setScorersA(list);
-    else setScorersB(list);
+  function removeEvent(idx) {
+    setEvents(events.filter((_, i) => i !== idx));
   }
-  function save() {
-    onSaveScorers(
-      match.id,
-      scorersA.filter((s) => s.playerId),
-      scorersB.filter((s) => s.playerId)
-    );
+  function saveAll() {
+    onSaveEvents(match.id, events);
+    onSaveNotes(match.id, notes);
   }
 
-  const totalGoals =
-    (match.scorersA || []).reduce((s, x) => s + (Number(x.goals) || 0), 0) +
-    (match.scorersB || []).reduce((s, x) => s + (Number(x.goals) || 0), 0);
+  const goalsCount = (match.events || []).filter((e) => e.type === "goal").length;
+  const cardsCount = (match.events || []).filter((e) => e.type !== "goal").length;
 
   if (!open) {
     return (
       <button onClick={() => setOpen(true)} className="text-[11px] text-gold2/70 hover:text-gold2 mt-1.5">
-        ⚽ تسجيل الهدافين {totalGoals > 0 ? `(${totalGoals} هدف مسجّل)` : ""}
+        📋 تفاصيل المباراة {goalsCount > 0 || cardsCount > 0 ? `(⚽ ${goalsCount} · 🟨 ${cardsCount})` : ""}
       </button>
     );
   }
 
+  const sorted = [...events].sort((x, y) => (Number(x.minute) || 0) - (Number(y.minute) || 0));
+
   return (
-    <div className="mt-2 grid sm:grid-cols-2 gap-3 bg-black/20 rounded-lg p-3">
-      <ScorerSide label={teamA?.name} players={playersA} rows={scorersA} onAdd={() => addRow("A")} onChange={(i, p) => updateRow("A", i, p)} onRemove={(i) => removeRow("A", i)} />
-      <ScorerSide label={teamB?.name} players={playersB} rows={scorersB} onAdd={() => addRow("B")} onChange={(i, p) => updateRow("B", i, p)} onRemove={(i) => removeRow("B", i)} />
-      <div className="sm:col-span-2 flex justify-end gap-2">
+    <div className="mt-2 bg-black/20 rounded-lg p-3 space-y-3">
+      <div className="grid sm:grid-cols-2 gap-3">
+        <EventSide label={teamA?.name} side="A" players={playersA} events={sorted} allEvents={events} onAdd={addEvent} onChange={updateEvent} onRemove={removeEvent} />
+        <EventSide label={teamB?.name} side="B" players={playersB} events={sorted} allEvents={events} onAdd={addEvent} onChange={updateEvent} onRemove={removeEvent} />
+      </div>
+      <div>
+        <label className="block text-xs text-white/50 mb-1">ملاحظات المباراة (اختياري)</label>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={2}
+          placeholder="مثال: تأجلت المباراة نصف ساعة بسبب المطر..."
+          className="w-full rounded-lg bg-black/30 border border-white/10 px-3 py-2 text-xs outline-none focus:border-gold/50 resize-none"
+        />
+      </div>
+      <div className="flex justify-end gap-2">
         <button onClick={() => setOpen(false)} className="text-xs px-3 py-1.5 rounded border border-white/15 text-white/60 hover:bg-white/5">إغلاق</button>
-        <button onClick={() => { save(); setOpen(false); }} className="text-xs px-3 py-1.5 rounded bg-gold/90 text-black font-semibold hover:bg-gold2">حفظ الهدافين</button>
+        <button onClick={() => { saveAll(); setOpen(false); }} className="text-xs px-3 py-1.5 rounded bg-gold/90 text-black font-semibold hover:bg-gold2">حفظ التفاصيل</button>
       </div>
     </div>
   );
 }
 
-function ScorerSide({ label, players, rows, onAdd, onChange, onRemove }) {
+function EventSide({ label, side, players, allEvents, onAdd, onChange, onRemove }) {
+  const rows = allEvents
+    .map((e, i) => ({ e, i }))
+    .filter(({ e }) => e.side === side);
+
   if (players.length === 0) {
     return (
       <div>
         <p className="text-xs text-white/50 mb-1">{label}</p>
-        <p className="text-[11px] text-white/30">
-          لا لاعبون مسجّلون لهذا الفريق — سجّلهم أولًا من تبويب "اللاعبون".
-        </p>
+        <p className="text-[11px] text-white/30">لا لاعبون مسجّلون — سجّلهم من تبويب "اللاعبون".</p>
       </div>
     );
   }
+
   return (
     <div>
       <p className="text-xs text-white/50 mb-1">{label}</p>
-      <div className="space-y-1">
-        {rows.map((s, i) => (
-          <div key={i} className="flex items-center gap-1">
-            <select
-              value={s.playerId}
-              onChange={(e) => onChange(i, { playerId: e.target.value })}
-              className="flex-1 bg-black/30 border border-white/10 rounded px-2 py-1 text-xs outline-none focus:border-gold/50"
-            >
-              {players.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
+      <div className="space-y-1 mb-1.5">
+        {rows.map(({ e, i }) => (
+          <div key={e.id} className="flex items-center gap-1">
+            <span className="w-5 text-center text-xs">{e.type === "goal" ? "⚽" : e.type === "yellow" ? "🟨" : "🟥"}</span>
+            <select value={e.playerId} onChange={(ev) => onChange(i, { playerId: ev.target.value })} className="flex-1 bg-black/30 border border-white/10 rounded px-1.5 py-1 text-xs outline-none focus:border-gold/50">
+              {players.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
-            <input type="number" min="1" value={s.goals} onChange={(e) => onChange(i, { goals: Number(e.target.value) })} className="w-12 text-center bg-black/30 border border-white/10 rounded px-1 py-1 text-xs outline-none focus:border-gold/50" />
+            <input
+              type="number"
+              min="1"
+              max="130"
+              value={e.minute}
+              onChange={(ev) => onChange(i, { minute: ev.target.value })}
+              placeholder="د"
+              className="w-11 text-center bg-black/30 border border-white/10 rounded px-1 py-1 text-xs outline-none focus:border-gold/50"
+            />
             <button onClick={() => onRemove(i)} className="text-red-400/60 hover:text-red-400 text-xs">×</button>
           </div>
         ))}
       </div>
-      <button onClick={onAdd} className="text-[11px] text-gold2/70 hover:text-gold2 mt-1">+ إضافة هداف</button>
+      <div className="flex gap-1.5 text-[11px]">
+        <button onClick={() => onAdd(side, "goal")} className="text-gold2/70 hover:text-gold2">+ ⚽ هدف</button>
+        <button onClick={() => onAdd(side, "yellow")} className="text-yellow-300/70 hover:text-yellow-300">+ 🟨 إنذار</button>
+        <button onClick={() => onAdd(side, "red")} className="text-red-400/70 hover:text-red-400">+ 🟥 طرد</button>
+      </div>
     </div>
   );
 }
@@ -697,11 +782,21 @@ function KnockoutTab({ data, refresh, flash }) {
     }
   }
 
-  async function saveScorers(matchId, scorersA, scorersB) {
+  async function saveEvents(matchId, events) {
     try {
-      await callApi(`/api/matches/${matchId}`, "PUT", { scorersA, scorersB });
+      await callApi(`/api/matches/${matchId}`, "PUT", { events });
       await refresh();
-      flash("تم حفظ الهدافين");
+      flash("تم حفظ أحداث المباراة");
+    } catch (e) {
+      flash(e.message, true);
+    }
+  }
+
+  async function saveNotes(matchId, notes) {
+    try {
+      await callApi(`/api/matches/${matchId}`, "PUT", { notes });
+      await refresh();
+      flash("تم حفظ الملاحظات");
     } catch (e) {
       flash(e.message, true);
     }
@@ -712,6 +807,25 @@ function KnockoutTab({ data, refresh, flash }) {
     try {
       await callApi(`/api/matches/${id}`, "DELETE");
       await refresh();
+    } catch (e) {
+      flash(e.message, true);
+    }
+  }
+
+  async function addManualKnockoutMatch(teamAId, teamBId, round, resetFn) {
+    if (!teamAId || !teamBId || teamAId === teamBId) {
+      flash("اختر فريقين مختلفين", true);
+      return;
+    }
+    if (!round?.trim()) {
+      flash("أدخل اسم الدور", true);
+      return;
+    }
+    try {
+      await callApi("/api/matches", "POST", { stage: "knockout", teamA: teamAId, teamB: teamBId, round: round.trim() });
+      resetFn();
+      await refresh();
+      flash("تمت إضافة المباراة يدويًا");
     } catch (e) {
       flash(e.message, true);
     }
@@ -733,6 +847,12 @@ function KnockoutTab({ data, refresh, flash }) {
         <button onClick={runKnockoutDraw} className="px-5 py-2.5 rounded-lg bg-gold/90 text-black font-semibold hover:bg-gold2 transition">
           إجراء القرعة ({selected.length} فريق مختار)
         </button>
+      </div>
+
+      <div className="glass-card rounded-2xl p-6">
+        <h2 className="font-display text-2xl text-gold2 mb-3">إضافة مباراة إقصائية يدويًا</h2>
+        <p className="text-white/50 text-sm mb-4">تحكّم كامل: حدد أي فريقين مباشرة بدل الاعتماد على القرعة العشوائية.</p>
+        <ManualKnockoutForm teams={data.teams} onAdd={addManualKnockoutMatch} />
       </div>
 
       {rounds.length === 0 ? (
@@ -762,7 +882,7 @@ function KnockoutTab({ data, refresh, flash }) {
                       </div>
                     )}
                     {m.winner && !isTie && <p className="mt-1 text-xs text-green-300/70">المتأهل: {teamById[m.winner]?.name}</p>}
-                    <ScorersPanel match={m} teamA={teamById[m.teamA]} teamB={teamById[m.teamB]} onSaveScorers={saveScorers} />
+                    <MatchDetailsPanel match={m} teamA={teamById[m.teamA]} teamB={teamById[m.teamB]} onSaveEvents={saveEvents} onSaveNotes={saveNotes} />
                   </div>
                 );
               })}
@@ -770,6 +890,34 @@ function KnockoutTab({ data, refresh, flash }) {
           </div>
         ))
       )}
+    </div>
+  );
+}
+
+/* نموذج إضافة مباراة إقصائية يدويًا (تحكم كامل، بدل الاعتماد فقط على القرعة العشوائية) */
+function ManualKnockoutForm({ teams, onAdd }) {
+  const [a, setA] = useState("");
+  const [b, setB] = useState("");
+  const [round, setRound] = useState("");
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <select value={a} onChange={(e) => setA(e.target.value)} className="rounded-lg bg-black/30 border border-white/10 px-3 py-2 text-sm outline-none focus:border-gold/50">
+        <option value="">الفريق الأول</option>
+        {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+      </select>
+      <span className="text-white/30 text-sm">ضد</span>
+      <select value={b} onChange={(e) => setB(e.target.value)} className="rounded-lg bg-black/30 border border-white/10 px-3 py-2 text-sm outline-none focus:border-gold/50">
+        <option value="">الفريق الثاني</option>
+        {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+      </select>
+      <input value={round} onChange={(e) => setRound(e.target.value)} placeholder="اسم الدور" className="rounded-lg bg-black/30 border border-white/10 px-3 py-2 text-sm outline-none focus:border-gold/50 w-32" />
+      <button
+        onClick={() => onAdd(a, b, round, () => { setA(""); setB(""); setRound(""); })}
+        className="px-3 py-2 rounded-lg bg-gold/90 text-black text-sm font-semibold hover:bg-gold2 transition"
+      >
+        إضافة المباراة
+      </button>
     </div>
   );
 }
