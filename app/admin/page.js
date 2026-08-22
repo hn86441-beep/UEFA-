@@ -455,6 +455,15 @@ function MatchesTab({ data, refresh, flash }) {
     }
   }
 
+  async function saveDateTime(matchId, date, time) {
+    try {
+      await callApi(`/api/matches/${matchId}`, "PUT", { date, time });
+      await refresh();
+    } catch (e) {
+      flash(e.message, true);
+    }
+  }
+
   async function saveEvents(matchId, events) {
     try {
       await callApi(`/api/matches/${matchId}`, "PUT", { events });
@@ -559,6 +568,7 @@ function MatchesTab({ data, refresh, flash }) {
                     onDelete={deleteMatch}
                     onSaveEvents={saveEvents}
                     onSaveNotes={saveNotes}
+                    onSaveDateTime={saveDateTime}
                   />
                 ))
               )}
@@ -603,7 +613,7 @@ function ManualMatchForm({ teams, onAdd }) {
   );
 }
 
-function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveEvents, onSaveNotes }) {
+function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveEvents, onSaveNotes, onSaveDateTime }) {
   const [a, setA] = useState(match.scoreA ?? "");
   const [b, setB] = useState(match.scoreB ?? "");
   return (
@@ -616,9 +626,35 @@ function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveEvents, onSaveN
         <span className="flex-1 truncate text-left">{teamB?.name || "—"}</span>
         <button onClick={() => onDelete(match.id)} className="text-red-400/60 hover:text-red-400 text-xs">حذف</button>
       </div>
+      {onSaveDateTime && <MatchDateTimeInputs match={match} onSave={onSaveDateTime} />}
       {onSaveEvents && (
         <MatchDetailsPanel match={match} teamA={teamA} teamB={teamB} onSaveEvents={onSaveEvents} onSaveNotes={onSaveNotes} />
       )}
+    </div>
+  );
+}
+
+/* حقلا التاريخ والوقت (مشتركان بين مباريات المجموعات وخروج المغلوب) */
+function MatchDateTimeInputs({ match, onSave }) {
+  const [date, setDate] = useState(match.date || "");
+  const [time, setTime] = useState(match.time || "");
+  return (
+    <div className="flex items-center gap-2 mt-1.5">
+      <span className="text-[11px] text-white/40">📅</span>
+      <input
+        type="date"
+        value={date}
+        onChange={(e) => setDate(e.target.value)}
+        onBlur={() => onSave(match.id, date, time)}
+        className="bg-black/20 border border-white/10 rounded px-2 py-1 text-xs outline-none focus:border-gold/50 [color-scheme:dark]"
+      />
+      <input
+        type="time"
+        value={time}
+        onChange={(e) => setTime(e.target.value)}
+        onBlur={() => onSave(match.id, date, time)}
+        className="bg-black/20 border border-white/10 rounded px-2 py-1 text-xs outline-none focus:border-gold/50 [color-scheme:dark]"
+      />
     </div>
   );
 }
@@ -773,6 +809,15 @@ function KnockoutTab({ data, refresh, flash }) {
     }
   }
 
+  async function saveDateTime(matchId, date, time) {
+    try {
+      await callApi(`/api/matches/${matchId}`, "PUT", { date, time });
+      await refresh();
+    } catch (e) {
+      flash(e.message, true);
+    }
+  }
+
   async function setWinnerManually(m, winnerId) {
     try {
       await callApi(`/api/matches/${m.id}`, "PUT", { winner: winnerId });
@@ -874,6 +919,7 @@ function KnockoutTab({ data, refresh, flash }) {
                       <span className="flex-1 truncate text-left">{teamById[m.teamB]?.name || "—"}</span>
                       <button onClick={() => deleteMatch(m.id)} className="text-red-400/60 hover:text-red-400 text-xs">حذف</button>
                     </div>
+                    <MatchDateTimeInputs match={m} onSave={saveDateTime} />
                     {isTie && (
                       <div className="mt-2 text-xs text-amber-300/80 flex items-center gap-2">
                         تعادل — حدد الفائز يدويًا:
