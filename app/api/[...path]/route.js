@@ -146,7 +146,7 @@ async function handlePOST(req, { params }) {
 
   // ---- إضافة مباراة يدويًا (تحكم كامل: يمكن إضافتها لأي مجموعة أو كمباراة إقصائية) ----
   if (seg === "matches") {
-    const { stage = "group", group = null, round = 1, teamA, teamB, date = "" } = body;
+    const { stage = "group", group = null, round = 1, teamA, teamB, date = "", time = "" } = body;
     if (!teamA || !teamB || teamA === teamB) return fail("اختر فريقين مختلفين");
     const data = await getData();
     const match = {
@@ -160,6 +160,7 @@ async function handlePOST(req, { params }) {
       scoreB: null,
       played: false,
       date,
+      time,
       winner: null,
       events: [],
       notes: "",
@@ -273,7 +274,7 @@ async function handlePUT(req, { params }) {
   if (p[0] === "matches" && p.length === 2) {
     const m = data.matches.find((m) => m.id === p[1]);
     if (!m) return fail("المباراة غير موجودة", 404);
-    ["scoreA", "scoreB", "played", "date", "round", "winner", "events", "notes"].forEach((k) => {
+    ["scoreA", "scoreB", "played", "date", "time", "round", "winner", "events", "notes"].forEach((k) => {
       if (k in body) m[k] = body[k];
     });
     if (m.stage === "knockout" && m.played && m.scoreA !== null && m.scoreB !== null) {
