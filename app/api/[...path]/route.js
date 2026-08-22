@@ -144,7 +144,7 @@ async function handlePOST(req, { params }) {
     return ok(group, { status: 201 });
   }
 
-  // ---- إضافة مباراة يدويًا ----
+  // ---- إضافة مباراة يدويًا (تحكم كامل: يمكن إضافتها لأي مجموعة أو كمباراة إقصائية) ----
   if (seg === "matches") {
     const { stage = "group", group = null, round = 1, teamA, teamB, date = "" } = body;
     if (!teamA || !teamB || teamA === teamB) return fail("اختر فريقين مختلفين");
@@ -161,8 +161,8 @@ async function handlePOST(req, { params }) {
       played: false,
       date,
       winner: null,
-      scorersA: [],
-      scorersB: [],
+      events: [],
+      notes: "",
     };
     data.matches.push(match);
     await saveData(data);
@@ -273,7 +273,7 @@ async function handlePUT(req, { params }) {
   if (p[0] === "matches" && p.length === 2) {
     const m = data.matches.find((m) => m.id === p[1]);
     if (!m) return fail("المباراة غير موجودة", 404);
-    ["scoreA", "scoreB", "played", "date", "round", "winner", "scorersA", "scorersB"].forEach((k) => {
+    ["scoreA", "scoreB", "played", "date", "round", "winner", "events", "notes"].forEach((k) => {
       if (k in body) m[k] = body[k];
     });
     if (m.stage === "knockout" && m.played && m.scoreA !== null && m.scoreB !== null) {
