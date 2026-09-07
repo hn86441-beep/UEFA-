@@ -532,41 +532,13 @@ function MatchesTab({ data, refresh, flash, celebrate }) {
     }
   }
 
-  async function saveEvents(matchId, events) {
+  // طلب واحد فقط يحفظ الأهداف والملاحظات وأفضل لاعب والتشكيلة معًا
+  // (بدل 4 طلبات منفصلة كانت تتسابق وتمحو تعديلات بعضها البعض)
+  async function saveDetails(matchId, patch) {
     try {
-      await callApi(`/api/matches/${matchId}`, "PUT", { events });
+      await callApi(`/api/matches/${matchId}`, "PUT", patch);
       await refresh();
-      flash("تم حفظ أحداث المباراة");
-    } catch (e) {
-      flash(e.message, true);
-    }
-  }
-
-  async function saveNotes(matchId, notes) {
-    try {
-      await callApi(`/api/matches/${matchId}`, "PUT", { notes });
-      await refresh();
-      flash("تم حفظ الملاحظات");
-    } catch (e) {
-      flash(e.message, true);
-    }
-  }
-
-  async function saveMotm(matchId, motm) {
-    try {
-      await callApi(`/api/matches/${matchId}`, "PUT", { motm });
-      await refresh();
-      flash("تم تحديد أفضل لاعب في المباراة");
-    } catch (e) {
-      flash(e.message, true);
-    }
-  }
-
-  async function saveLineups(matchId, lineups) {
-    try {
-      await callApi(`/api/matches/${matchId}`, "PUT", { lineups });
-      await refresh();
-      flash("تم حفظ التشكيلة");
+      flash("تم حفظ تفاصيل المباراة");
     } catch (e) {
       flash(e.message, true);
     }
@@ -657,11 +629,8 @@ function MatchesTab({ data, refresh, flash, celebrate }) {
                     teamB={teamById[m.teamB]}
                     onSave={saveScore}
                     onDelete={deleteMatch}
-                    onSaveEvents={saveEvents}
-                    onSaveNotes={saveNotes}
                     onSaveDateTime={saveDateTime}
-                    onSaveMotm={saveMotm}
-                    onSaveLineups={saveLineups}
+                    onSaveDetails={saveDetails}
                   />
                 ))
               )}
@@ -723,7 +692,7 @@ function ManualMatchForm({ teams, onAdd }) {
   );
 }
 
-function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveEvents, onSaveNotes, onSaveDateTime, onSaveMotm, onSaveLineups }) {
+function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveDateTime, onSaveDetails }) {
   const [a, setA] = useState(match.scoreA ?? "");
   const [b, setB] = useState(match.scoreB ?? "");
   return (
@@ -737,15 +706,12 @@ function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveEvents, onSaveN
         <button onClick={() => onDelete(match.id)} className="text-red-400/60 hover:text-red-400 text-xs">حذف</button>
       </div>
       {onSaveDateTime && <MatchDateTimeInputs match={match} onSave={onSaveDateTime} />}
-      {onSaveEvents && (
+      {onSaveDetails && (
         <MatchDetailsPanel
           match={match}
           teamA={teamA}
           teamB={teamB}
-          onSaveEvents={onSaveEvents}
-          onSaveNotes={onSaveNotes}
-          onSaveMotm={onSaveMotm}
-          onSaveLineups={onSaveLineups}
+          onSaveDetails={onSaveDetails}
         />
       )}
     </div>
@@ -787,7 +753,7 @@ function MatchDateTimeInputs({ match, onSave }) {
 }
 
 /* ---------------- تفاصيل المباراة: أهداف بالدقيقة + إنذارات + ملاحظات ---------------- */
-function MatchDetailsPanel({ match, teamA, teamB, onSaveEvents, onSaveNotes, onSaveMotm, onSaveLineups }) {
+function MatchDetailsPanel({ match, teamA, teamB, onSaveDetails }) {
   const [open, setOpen] = useState(false);
   const [events, setEvents] = useState(match.events || []);
   const [notes, setNotes] = useState(match.notes || "");
@@ -816,11 +782,10 @@ function MatchDetailsPanel({ match, teamA, teamB, onSaveEvents, onSaveNotes, onS
     const next = current.includes(playerId) ? current.filter((id) => id !== playerId) : [...current, playerId];
     setLineups({ ...lineups, [side]: { ...lineups[side], [group]: next } });
   }
+  // طلب حفظ واحد فقط يحمل كل التغييرات معًا (كان سابقًا 4 طلبات منفصلة تتسابق
+  // وتمحو تعديلات بعضها البعض عند الحفظ في نفس اللحظة)
   function saveAll() {
-    onSaveEvents(match.id, events);
-    onSaveNotes(match.id, notes);
-    onSaveMotm?.(match.id, motm);
-    onSaveLineups?.(match.id, lineups);
+    onSaveDetails(match.id, { events, notes, motm, lineups });
   }
 
   const goalsCount = (match.events || []).filter((e) => e.type === "goal").length;
@@ -1046,41 +1011,13 @@ function KnockoutTab({ data, refresh, flash, celebrate }) {
     }
   }
 
-  async function saveEvents(matchId, events) {
+  // طلب واحد فقط يحفظ الأهداف والملاحظات وأفضل لاعب والتشكيلة معًا
+  // (بدل 4 طلبات منفصلة كانت تتسابق وتمحو تعديلات بعضها البعض)
+  async function saveDetails(matchId, patch) {
     try {
-      await callApi(`/api/matches/${matchId}`, "PUT", { events });
+      await callApi(`/api/matches/${matchId}`, "PUT", patch);
       await refresh();
-      flash("تم حفظ أحداث المباراة");
-    } catch (e) {
-      flash(e.message, true);
-    }
-  }
-
-  async function saveNotes(matchId, notes) {
-    try {
-      await callApi(`/api/matches/${matchId}`, "PUT", { notes });
-      await refresh();
-      flash("تم حفظ الملاحظات");
-    } catch (e) {
-      flash(e.message, true);
-    }
-  }
-
-  async function saveMotm(matchId, motm) {
-    try {
-      await callApi(`/api/matches/${matchId}`, "PUT", { motm });
-      await refresh();
-      flash("تم تحديد أفضل لاعب في المباراة");
-    } catch (e) {
-      flash(e.message, true);
-    }
-  }
-
-  async function saveLineups(matchId, lineups) {
-    try {
-      await callApi(`/api/matches/${matchId}`, "PUT", { lineups });
-      await refresh();
-      flash("تم حفظ التشكيلة");
+      flash("تم حفظ تفاصيل المباراة");
     } catch (e) {
       flash(e.message, true);
     }
@@ -1171,10 +1108,7 @@ function KnockoutTab({ data, refresh, flash, celebrate }) {
                       match={m}
                       teamA={teamById[m.teamA]}
                       teamB={teamById[m.teamB]}
-                      onSaveEvents={saveEvents}
-                      onSaveNotes={saveNotes}
-                      onSaveMotm={saveMotm}
-                      onSaveLineups={saveLineups}
+                      onSaveDetails={saveDetails}
                     />
                   </div>
                 );
