@@ -18,7 +18,7 @@ export default function Nav({ leagueName = "دوري الأبطال" }) {
               </linearGradient>
             </defs>
           </svg>
-          <span className="font-display text-2xl tracking-wide gold-text">{leagueName}</span>
+          <span className="font-brand text-2xl tracking-wide gold-text">{leagueName}</span>
         </Link>
         <nav className="flex items-center gap-1 sm:gap-3 text-sm">
           <Link href="/?tab=standings" className="px-2 sm:px-3 py-2 rounded-lg hover:bg-white/5 transition">الترتيب</Link>
