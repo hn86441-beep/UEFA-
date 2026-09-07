@@ -1,9 +1,10 @@
 "use client";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Nav from "../components/Nav";
+import Confetti from "../components/Confetti";
 import { useLeagueData } from "../lib/useLeagueData";
-import { computeStandings, computeTopScorers, matchEventsTimeline } from "../lib/logic";
+import { computeStandings, computeTopScorers, matchEventsTimeline, detectLeagueStage } from "../lib/logic";
 import Link from "next/link";
 
 const TABS = [
@@ -26,25 +27,80 @@ function HomeInner() {
   const searchParams = useSearchParams();
   const initialTab = searchParams.get("tab") || "standings";
   const [tab, setTab] = useState(initialTab);
+  const [confettiTick, setConfettiTick] = useState(0);
+  const whistlePlayed = useRef(false);
+
+  // صافرة ترحيب خفيفة تُسمع مرة واحدة فقط لكل جلسة تصفح (يمكن تعطيلها من الإعدادات)
+  useEffect(() => {
+    if (!data?.settings) return;
+    if (data.settings.soundEnabled === false) return;
+    if (whistlePlayed.current) return;
+    if (typeof window === "undefined") return;
+    if (sessionStorage.getItem("cl_whistle_played")) return;
+    whistlePlayed.current = true;
+    sessionStorage.setItem("cl_whistle_played", "1");
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(2200, ctx.currentTime);
+      osc.frequency.linearRampToValueAtTime(3100, ctx.currentTime + 0.12);
+      osc.frequency.linearRampToValueAtTime(2400, ctx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 0.03);
+      gain.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.36);
+    } catch {
+      /* تجاهل: بعض المتصفحات تمنع الصوت التلقائي، لا مشكلة */
+    }
+  }, [data?.settings]);
+
+  // كونفيتي خفيف عند أول فتح لتبويب الهدافون والجوائز في هذه الجلسة
+  function handleTabChange(id) {
+    setTab(id);
+    if (id === "awards" && typeof window !== "undefined" && !sessionStorage.getItem("cl_awards_confetti")) {
+      sessionStorage.setItem("cl_awards_confetti", "1");
+      setConfettiTick((t) => t + 1);
+    }
+  }
 
   if (loading) return <Shell><p className="text-center text-white/40 font-display text-2xl py-24">جارِ تحميل الدوري...</p></Shell>;
   if (error || !data) return <Shell><p className="text-center text-white/60 py-24">تعذر تحميل البيانات{error ? `: ${error}` : ""}</p></Shell>;
 
   const { teams, groups, matches, settings } = data;
+  const stage = detectLeagueStage(data);
+  const championTeam = settings?.championTeamId ? teams.find((t) => t.id === settings.championTeamId) : null;
+  const today = new Date().toISOString().slice(0, 10);
+  const todaysMatches = matches.filter((m) => m.date === today);
+  const teamById = Object.fromEntries(teams.map((t) => [t.id, t]));
 
   return (
     <Shell settings={settings}>
+      <Confetti trigger={confettiTick} />
+      <div className={`stage-glow stage-${stage}`} />
+
+      {championTeam && <CoronationBanner team={championTeam} settings={settings} />}
+
       <StadiumHero settings={settings} />
 
       {teams.length === 0 ? (
         <EmptyState />
       ) : (
         <>
+          {todaysMatches.length > 0 && (
+            <TodaysMatchesBanner matches={todaysMatches} teamById={teamById} />
+          )}
+
           <div className="flex justify-center gap-2 mb-8 flex-wrap">
             {TABS.map((t) => (
               <button
                 key={t.id}
-                onClick={() => setTab(t.id)}
+                onClick={() => handleTabChange(t.id)}
                 className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
                   tab === t.id ? "bg-gold/90 text-black" : "glass-card text-white/70 hover:text-white"
                 }`}
@@ -54,13 +110,51 @@ function HomeInner() {
             ))}
           </div>
 
-          {tab === "standings" && <StandingsTab teams={teams} groups={groups} matches={matches} />}
-          {tab === "groups" && <GroupsTab teams={teams} groups={groups} matches={matches} />}
-          {tab === "bracket" && <BracketTab teams={teams} matches={matches} />}
-          {tab === "awards" && <AwardsView teams={teams} matches={matches} settings={settings} />}
+          <div key={tab} className="tab-transition">
+            {tab === "standings" && <StandingsTab teams={teams} groups={groups} matches={matches} />}
+            {tab === "groups" && <GroupsTab teams={teams} groups={groups} matches={matches} />}
+            {tab === "bracket" && <BracketTab teams={teams} matches={matches} />}
+            {tab === "awards" && <AwardsView teams={teams} matches={matches} settings={settings} />}
+          </div>
         </>
       )}
     </Shell>
+  );
+}
+
+/* ==================== صفحة/شريط التتويج عند تحديد البطل ==================== */
+function CoronationBanner({ team, settings }) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    setTick(1);
+  }, []);
+  return (
+    <section className="relative overflow-hidden rounded-2xl mx-auto max-w-3xl mt-8 p-8 text-center border-2 border-gold bg-gradient-to-b from-[#241b0a] to-[#0b0d20] shadow-[0_0_40px_rgba(212,175,55,0.35)] pop-in">
+      <Confetti trigger={tick} />
+      <p className="text-gold2/80 tracking-[0.3em] text-xs mb-2">🏆 بطل الموسم {settings?.season}</p>
+      <h2 className="font-brand text-5xl sm:text-6xl gold-text mb-2">{team.name}</h2>
+      {settings?.awards?.bestPlayer && (
+        <p className="text-white/60 text-sm">⭐ أفضل لاعب في الموسم: {settings.awards.bestPlayer}</p>
+      )}
+    </section>
+  );
+}
+
+/* ==================== شريط مباريات اليوم ==================== */
+function TodaysMatchesBanner({ matches, teamById }) {
+  return (
+    <section className="glass-card rounded-2xl p-4 mb-6">
+      <h3 className="font-display text-xl text-gold2 mb-2 text-center">⚡ مباريات اليوم</h3>
+      <div className="grid sm:grid-cols-2 gap-2">
+        {matches.map((m) => (
+          <div key={m.id} className="flex items-center justify-between text-sm rounded-lg border border-gold/20 px-3 py-2">
+            <span className="truncate">{teamById[m.teamA]?.name}</span>
+            <span className="text-gold2 text-xs px-2">{m.time || "🕐"}</span>
+            <span className="truncate text-left">{teamById[m.teamB]?.name}</span>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -147,7 +241,7 @@ function StadiumHero({ settings }) {
       <p className="font-display text-gold2/80 tracking-[0.3em] text-sm mb-2">
         موسم {settings?.season}
       </p>
-      <h1 className="font-display text-5xl sm:text-7xl gold-text leading-none mb-2">
+      <h1 className="font-brand text-5xl sm:text-7xl gold-text leading-none mb-2">
         {settings?.leagueName}
       </h1>
       <p className="text-white/40 text-sm">ليلة الأبطال تبدأ هنا</p>
