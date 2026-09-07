@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import {
   getData,
   saveData,
-  resetData,
+  defaultData,
   makeSessionCookie,
   clearSessionCookie,
   isAuthedFromCookieHeader,
@@ -50,7 +50,9 @@ async function handleGET(req, { params }) {
   const seg = p.join("/");
 
   if (seg === "data") {
-    return ok(await getData());
+    const data = await getData();
+    if (!data.archives) data.archives = [];
+    return ok(data);
   }
   if (seg === "auth/check") {
     const authed = await isAuthedFromCookieHeader(req.headers.get("cookie") || "");
@@ -146,7 +148,7 @@ async function handlePOST(req, { params }) {
 
   // ---- إضافة مباراة يدويًا (تحكم كامل: يمكن إضافتها لأي مجموعة أو كمباراة إقصائية) ----
   if (seg === "matches") {
-    const { stage = "group", group = null, round = 1, teamA, teamB, date = "", time = "" } = body;
+    const { stage = "group", group = null, round = 1, teamA, teamB, date = "", time = "", venue = "" } = body;
     if (!teamA || !teamB || teamA === teamB) return fail("اختر فريقين مختلفين");
     const data = await getData();
     const match = {
@@ -161,9 +163,12 @@ async function handlePOST(req, { params }) {
       played: false,
       date,
       time,
+      venue,
       winner: null,
       events: [],
       notes: "",
+      motm: null,
+      lineups: { A: { starting: [], subs: [] }, B: { starting: [], subs: [] } },
     };
     data.matches.push(match);
     await saveData(data);
@@ -224,9 +229,33 @@ async function handlePOST(req, { params }) {
     return ok(data);
   }
 
-  // ---- إعادة ضبط كاملة ----
+  // ---- أرشفة الموسم الحالي وبدء موسم جديد ----
+  if (seg === "season/archive") {
+    const data = await getData();
+    if (data.teams.length === 0) return fail("لا يوجد شيء لأرشفته بعد");
+    const archive = {
+      id: uid("arc"),
+      label: body.label?.trim() || data.settings?.season || "موسم",
+      archivedAt: new Date().toISOString(),
+      settings: data.settings,
+      teams: data.teams,
+      groups: data.groups,
+      matches: data.matches,
+    };
+    const fresh = defaultData();
+    fresh.archives = [...(data.archives || []), archive];
+    fresh.settings.leagueName = data.settings?.leagueName || fresh.settings.leagueName;
+    await saveData(fresh);
+    return ok(fresh);
+  }
+
+  // ---- إعادة ضبط كاملة (مع الحفاظ على أرشيف المواسم السابقة) ----
   if (seg === "reset") {
-    return ok(await resetData());
+    const data = await getData();
+    const fresh = defaultData();
+    fresh.archives = data.archives || [];
+    await saveData(fresh);
+    return ok(fresh);
   }
 
   return fail("غير موجود", 404);
@@ -257,7 +286,7 @@ async function handlePUT(req, { params }) {
   if (p[0] === "teams" && p.length === 2) {
     const t = data.teams.find((t) => t.id === p[1]);
     if (!t) return fail("الفريق غير موجود", 404);
-    const allowed = ["name", "group", "logo", "played", "won", "drawn", "lost", "gf", "ga", "points", "players"];
+    const allowed = ["name", "group", "logo", "played", "won", "drawn", "lost", "gf", "ga", "points", "players", "captainId"];
     allowed.forEach((k) => { if (k in body) t[k] = body[k]; });
     await saveData(data);
     return ok(t);
@@ -274,7 +303,7 @@ async function handlePUT(req, { params }) {
   if (p[0] === "matches" && p.length === 2) {
     const m = data.matches.find((m) => m.id === p[1]);
     if (!m) return fail("المباراة غير موجودة", 404);
-    ["scoreA", "scoreB", "played", "date", "time", "round", "winner", "events", "notes"].forEach((k) => {
+    ["scoreA", "scoreB", "played", "date", "time", "round", "winner", "events", "notes", "venue", "motm", "lineups"].forEach((k) => {
       if (k in body) m[k] = body[k];
     });
     if (m.stage === "knockout" && m.played && m.scoreA !== null && m.scoreB !== null) {
