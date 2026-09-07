@@ -45,13 +45,35 @@ html, body {
 }
 
 .font-display { font-family: var(--font-display); letter-spacing: 0.02em; }
+.font-brand { font-family: "Lalezar", var(--font-display), sans-serif; letter-spacing: 0.01em; }
 .crest-star { filter: drop-shadow(0 0 12px rgba(212,175,55,0.55)); }
 
+@keyframes crestPulse {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 1; filter: drop-shadow(0 0 18px rgba(212,175,55,0.7)); }
+}
+
 .glass-card {
+  position: relative;
   background: linear-gradient(180deg, rgba(20,28,64,0.55), rgba(9,13,30,0.55));
   border: 1px solid rgba(212,175,55,0.18);
   backdrop-filter: blur(6px);
+  overflow: hidden;
 }
+
+/* خط مائي خفيف جدًا لدرع أصلي في خلفية البطاقات */
+.glass-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M50 6 L58 34 L88 38 L64 58 L72 88 L50 70 L28 88 L36 58 L12 38 L42 34 Z' fill='none' stroke='%23d4af37' stroke-width='2'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 105% 105%;
+  background-size: 220px 220px;
+}
+.glass-card > * { position: relative; z-index: 1; }
 
 .gold-text {
   background: linear-gradient(180deg, #f6e2a0, #d4af37 60%, #a9812a);
@@ -61,3 +83,41 @@ html, body {
 }
 
 table { border-collapse: collapse; }
+
+/* انتقال ناعم عند تبديل التبويبات */
+@keyframes tabFadeSlide {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.tab-transition { animation: tabFadeSlide 0.35s ease-out; }
+
+/* كونفيتي بسيط بدون أي مكتبة خارجية */
+@keyframes confettiFall {
+  0% { transform: translateY(-10vh) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(100vh) rotate(540deg); opacity: 0; }
+}
+.confetti-piece {
+  position: fixed;
+  top: 0;
+  z-index: 9999;
+  pointer-events: none;
+  animation: confettiFall linear forwards;
+}
+
+/* تدرّج خلفية الملعب يتغيّر حسب مرحلة الدوري */
+.stage-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition: background 1.2s ease;
+}
+.stage-groups { background: radial-gradient(ellipse 90% 60% at 50% 0%, rgba(111,43,214,0.10), transparent 60%); }
+.stage-knockout { background: radial-gradient(ellipse 90% 60% at 50% 0%, rgba(212,175,55,0.14), transparent 60%); }
+.stage-final { background: radial-gradient(ellipse 100% 70% at 50% 0%, rgba(212,175,55,0.26), transparent 65%); }
+.stage-champion { background: radial-gradient(ellipse 100% 80% at 50% 0%, rgba(243,214,117,0.32), transparent 70%); }
+
+@keyframes popIn {
+  0% { transform: scale(0.9); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.pop-in { animation: popIn 0.4s ease-out; }
