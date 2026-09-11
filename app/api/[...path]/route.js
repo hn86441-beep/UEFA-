@@ -169,6 +169,7 @@ async function handlePOST(req, { params }) {
       notes: "",
       motm: null,
       lineups: { A: { starting: [], subs: [] }, B: { starting: [], subs: [] } },
+      clock: { running: false, accumulated: 0, startedAt: null },
     };
     data.matches.push(match);
     await saveData(data);
@@ -303,7 +304,7 @@ async function handlePUT(req, { params }) {
   if (p[0] === "matches" && p.length === 2) {
     const m = data.matches.find((m) => m.id === p[1]);
     if (!m) return fail("المباراة غير موجودة", 404);
-    ["scoreA", "scoreB", "played", "date", "time", "round", "winner", "events", "notes", "venue", "motm", "lineups"].forEach((k) => {
+    ["scoreA", "scoreB", "played", "date", "time", "round", "winner", "events", "notes", "venue", "motm", "lineups", "clock"].forEach((k) => {
       if (k in body) m[k] = body[k];
     });
     if (m.stage === "knockout" && m.played && m.scoreA !== null && m.scoreB !== null) {
