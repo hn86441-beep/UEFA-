@@ -4,7 +4,7 @@ import { useSearchParams } from "next/navigation";
 import Nav from "../components/Nav";
 import Confetti from "../components/Confetti";
 import { useLeagueData } from "../lib/useLeagueData";
-import { computeStandings, computeTopScorers, matchEventsTimeline, detectLeagueStage, computeRecordsBook } from "../lib/logic";
+import { computeStandings, computeTopScorers, matchEventsTimeline, detectLeagueStage, computeRecordsBook, generateCommentaryLine } from "../lib/logic";
 import Link from "next/link";
 
 const TABS = [
@@ -313,6 +313,30 @@ function formatMatchDateTime(match) {
   return match.date || match.time;
 }
 
+// نطق نص بصوت اصطناعي عادي متوفر في المتصفح (ليس محاكاة لصوت أي شخص حقيقي)
+function speak(text) {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = "ar-SA";
+  utter.rate = 1.05;
+  utter.pitch = 1.05;
+  window.speechSynthesis.speak(utter);
+}
+
+// نطق كل أحداث المباراة بالترتيب، حدثًا تلو الآخر
+function speakAll(timeline) {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  timeline.forEach((e) => {
+    const utter = new SpeechSynthesisUtterance(generateCommentaryLine(e));
+    utter.lang = "ar-SA";
+    utter.rate = 1.05;
+    utter.pitch = 1.05;
+    window.speechSynthesis.speak(utter);
+  });
+}
+
 function MatchCard({ match, teamA, teamB }) {
   const [open, setOpen] = useState(false);
   const timeline = matchEventsTimeline(match, teamA, teamB);
@@ -344,14 +368,32 @@ function MatchCard({ match, teamA, teamB }) {
         <span className="truncate text-left">{teamB?.name}</span>
       </button>
       {open && hasDetails && (
-        <div className="border-t border-white/10 bg-black/20 px-4 py-3 space-y-2">
-          {timeline.map((e) => (
-            <div key={e.id} className={`flex items-center gap-2 text-xs ${e.side === "B" ? "flex-row-reverse text-left" : ""}`}>
-              <span>{e.type === "goal" ? "⚽" : e.type === "yellow" ? "🟨" : "🟥"}</span>
-              <span className="text-white/70">{e.playerName}</span>
-              <span className="text-white/40">{e.minute ? `${e.minute}'` : ""}</span>
+        <div className="border-t border-white/10 bg-black/20 px-4 py-3 space-y-3">
+          {timeline.length > 0 && (
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] text-gold2/70">🎙️ تعليق حي على أحداث المباراة</p>
+              <button
+                onClick={() => speakAll(timeline)}
+                className="text-[11px] px-2 py-1 rounded border border-gold/30 text-gold2 hover:bg-gold/10"
+              >
+                ▶️ تشغيل كل التعليق
+              </button>
             </div>
-          ))}
+          )}
+          <div className="space-y-2">
+            {timeline.map((e) => (
+              <div key={e.id} className={`flex items-start gap-2 text-xs ${e.side === "B" ? "flex-row-reverse text-right" : ""}`}>
+                <button
+                  onClick={() => speak(generateCommentaryLine(e))}
+                  className="shrink-0 mt-0.5 text-gold2/60 hover:text-gold2"
+                  title="استمع للتعليق"
+                >
+                  🔊
+                </button>
+                <p className="text-white/70 leading-relaxed">{generateCommentaryLine(e)}</p>
+              </div>
+            ))}
+          </div>
           {match.notes && (
             <p className="text-[11px] text-white/40 pt-1 border-t border-white/5 mt-2">📋 {match.notes}</p>
           )}
@@ -437,7 +479,8 @@ function BracketMatchScorers({ match, teamA, teamB }) {
   return (
     <div className="mt-2 pt-2 border-t border-white/10 space-y-0.5">
       {timeline.map((e) => (
-        <p key={e.id} className={`text-[11px] text-white/40 ${e.side === "B" ? "text-left" : ""}`}>
+        <p key={e.id} className={`text-[11px] text-white/40 flex items-center gap-1 ${e.side === "B" ? "flex-row-reverse text-left" : ""}`}>
+          <button onClick={() => speak(generateCommentaryLine(e))} className="text-gold2/50 hover:text-gold2" title="استمع للتعليق">🔊</button>
           ⚽ {e.playerName} {e.minute ? `${e.minute}'` : ""}
         </p>
       ))}
