@@ -24,12 +24,15 @@ export default function HomePage() {
 }
 
 function HomeInner() {
-  const { data, loading, error } = useLeagueData();
+  const { data, loading, error } = useLeagueData({ poll: 12000 });
   const searchParams = useSearchParams();
   const initialTab = searchParams.get("tab") || "standings";
   const [tab, setTab] = useState(initialTab);
   const [confettiTick, setConfettiTick] = useState(0);
+  const [narrationOn, setNarrationOn] = useState(true);
   const whistlePlayed = useRef(false);
+  const spokenEventIds = useRef(new Set());
+  const narrationInitialized = useRef(false);
 
   // صافرة ترحيب خفيفة تُسمع مرة واحدة فقط لكل جلسة تصفح (يمكن تعطيلها من الإعدادات)
   useEffect(() => {
@@ -61,6 +64,32 @@ function HomeInner() {
     }
   }, [data?.settings]);
 
+  // تعليق صوتي تلقائي حي: كل حدث جديد يُسجَّل في مباراة "مباشرة" يُنطق فور ظهوره
+  // بدون أي ضغط زر من الزائر — يبدأ فقط بعد أول تحديث لتجنّب سرد كل تاريخ المباراة دفعة واحدة
+  useEffect(() => {
+    if (!data?.matches || !narrationOn) return;
+    const teamById = Object.fromEntries((data.teams || []).map((t) => [t.id, t]));
+    const liveMatches = data.matches.filter((m) => m.clock?.running);
+
+    if (!narrationInitialized.current) {
+      // أول مرة فقط: سجّل كل الأحداث الحالية كـ"مسموعة" دون نطقها، حتى لا نسرد كل شيء دفعة واحدة
+      liveMatches.forEach((m) => {
+        matchEventsTimeline(m, teamById[m.teamA], teamById[m.teamB]).forEach((e) => spokenEventIds.current.add(e.id));
+      });
+      narrationInitialized.current = true;
+      return;
+    }
+
+    liveMatches.forEach((m) => {
+      const timeline = matchEventsTimeline(m, teamById[m.teamA], teamById[m.teamB]);
+      timeline.forEach((e) => {
+        if (spokenEventIds.current.has(e.id)) return;
+        spokenEventIds.current.add(e.id);
+        queueSpeak(generateCommentaryLine(e), e.type);
+      });
+    });
+  }, [data?.matches, data?.teams, narrationOn]);
+
   // كونفيتي خفيف عند أول فتح لتبويب الهدافون والجوائز في هذه الجلسة
   function handleTabChange(id) {
     setTab(id);
@@ -79,6 +108,7 @@ function HomeInner() {
   const today = new Date().toISOString().slice(0, 10);
   const todaysMatches = matches.filter((m) => m.date === today);
   const teamById = Object.fromEntries(teams.map((t) => [t.id, t]));
+  const hasLiveMatch = matches.some((m) => m.clock?.running);
 
   return (
     <Shell settings={settings}>
@@ -93,6 +123,23 @@ function HomeInner() {
         <EmptyState />
       ) : (
         <>
+          {hasLiveMatch && (
+            <div className="flex justify-center mb-4">
+              <button
+                onClick={() => {
+                  setNarrationOn((v) => !v);
+                  if (narrationOn && typeof window !== "undefined") window.speechSynthesis?.cancel();
+                }}
+                className={`text-xs px-4 py-2 rounded-full border flex items-center gap-2 transition ${
+                  narrationOn ? "border-gold/50 text-gold2 bg-gold/10" : "border-white/15 text-white/40"
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${narrationOn ? "bg-red-500 animate-pulse" : "bg-white/30"}`} />
+                🎙️ التعليق الصوتي المباشر {narrationOn ? "مفعّل" : "معطّل"}
+              </button>
+            </div>
+          )}
+
           {todaysMatches.length > 0 && (
             <TodaysMatchesBanner matches={todaysMatches} teamById={teamById} />
           )}
@@ -313,28 +360,60 @@ function formatMatchDateTime(match) {
   return match.date || match.time;
 }
 
-// نطق نص بصوت اصطناعي عادي متوفر في المتصفح (ليس محاكاة لصوت أي شخص حقيقي)
-function speak(text) {
-  if (typeof window === "undefined" || !window.speechSynthesis) return;
-  window.speechSynthesis.cancel();
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = "ar-SA";
-  utter.rate = 1.05;
-  utter.pitch = 1.05;
-  window.speechSynthesis.speak(utter);
+// ينظّف النص المكتوب (المزخرف بصريًا بشرطات وعلامات تعجب متكررة) قبل نطقه
+// حتى يخرج الصوت واضحًا بدل أن يقرأ الرموز الزخرفية حرفيًا
+function cleanForSpeech(text) {
+  return text
+    .replace(/[ـ]+/g, "") // إزالة حرف المدّ (التطويل) الزخرفي
+    .replace(/!{2,}/g, "!") // تبسيط علامات التعجب المتكررة
+    .replace(/[⚽🟨🟥🎙️🔊▶️]/gu, ""); // إزالة الرموز التعبيرية من النص المنطوق
 }
 
-// نطق كل أحداث المباراة بالترتيب، حدثًا تلو الآخر
+// يختار أفضل صوت عربي متاح في المتصفح إن وُجد (صوت اصطناعي عام، وليس محاكاة لأي شخص)
+function pickArabicVoice() {
+  if (typeof window === "undefined" || !window.speechSynthesis) return null;
+  const voices = window.speechSynthesis.getVoices();
+  return voices.find((v) => v.lang?.toLowerCase().startsWith("ar")) || null;
+}
+
+// إعدادات نطق أكثر حماسًا حسب نوع الحدث (أسرع وأعلى نبرة للأهداف، أهدأ للبطاقات)
+function excitementSettings(type) {
+  if (type === "goal") return { rate: 1.15, pitch: 1.25 };
+  if (type === "red") return { rate: 1.08, pitch: 0.9 };
+  return { rate: 1.0, pitch: 1.0 };
+}
+
+function buildUtterance(text, type) {
+  const utter = new SpeechSynthesisUtterance(cleanForSpeech(text));
+  utter.lang = "ar-SA";
+  const { rate, pitch } = excitementSettings(type);
+  utter.rate = rate;
+  utter.pitch = pitch;
+  const voice = pickArabicVoice();
+  if (voice) utter.voice = voice;
+  return utter;
+}
+
+// نطق فوري (يقاطع أي نطق سابق) — يُستخدم عند ضغط الزائر على زر 🔊 يدويًا
+function speak(text, type) {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(buildUtterance(text, type));
+}
+
+// نطق كل أحداث المباراة بالترتيب، حدثًا تلو الآخر (يقاطع أي نطق سابق)
 function speakAll(timeline) {
   if (typeof window === "undefined" || !window.speechSynthesis) return;
   window.speechSynthesis.cancel();
   timeline.forEach((e) => {
-    const utter = new SpeechSynthesisUtterance(generateCommentaryLine(e));
-    utter.lang = "ar-SA";
-    utter.rate = 1.05;
-    utter.pitch = 1.05;
-    window.speechSynthesis.speak(utter);
+    window.speechSynthesis.speak(buildUtterance(generateCommentaryLine(e), e.type));
   });
+}
+
+// نطق تلقائي حي بدون مقاطعة ما يُقال حاليًا — يُستخدم للتعليق التلقائي على المباريات المباشرة
+function queueSpeak(text, type) {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  window.speechSynthesis.speak(buildUtterance(text, type));
 }
 
 function MatchCard({ match, teamA, teamB }) {
@@ -384,7 +463,7 @@ function MatchCard({ match, teamA, teamB }) {
             {timeline.map((e) => (
               <div key={e.id} className={`flex items-start gap-2 text-xs ${e.side === "B" ? "flex-row-reverse text-right" : ""}`}>
                 <button
-                  onClick={() => speak(generateCommentaryLine(e))}
+                  onClick={() => speak(generateCommentaryLine(e), e.type)}
                   className="shrink-0 mt-0.5 text-gold2/60 hover:text-gold2"
                   title="استمع للتعليق"
                 >
@@ -480,7 +559,7 @@ function BracketMatchScorers({ match, teamA, teamB }) {
     <div className="mt-2 pt-2 border-t border-white/10 space-y-0.5">
       {timeline.map((e) => (
         <p key={e.id} className={`text-[11px] text-white/40 flex items-center gap-1 ${e.side === "B" ? "flex-row-reverse text-left" : ""}`}>
-          <button onClick={() => speak(generateCommentaryLine(e))} className="text-gold2/50 hover:text-gold2" title="استمع للتعليق">🔊</button>
+          <button onClick={() => speak(generateCommentaryLine(e), e.type)} className="text-gold2/50 hover:text-gold2" title="استمع للتعليق">🔊</button>
           ⚽ {e.playerName} {e.minute ? `${e.minute}'` : ""}
         </p>
       ))}
