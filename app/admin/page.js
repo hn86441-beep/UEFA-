@@ -544,6 +544,17 @@ function MatchesTab({ data, refresh, flash, celebrate }) {
     }
   }
 
+  // بدون رسالة تأكيد في كل مرة (تُستخدم بكثرة عند بدء/إيقاف ساعة المباراة)
+  async function saveClock(matchId, clock) {
+    try {
+      await callApi(`/api/matches/${matchId}`, "PUT", { clock });
+      await refresh();
+    } catch (e) {
+      flash(e.message, true);
+    }
+  }
+
+
   async function deleteMatch(id) {
     if (!confirm("حذف هذه المباراة؟")) return;
     try {
@@ -631,6 +642,7 @@ function MatchesTab({ data, refresh, flash, celebrate }) {
                     onDelete={deleteMatch}
                     onSaveDateTime={saveDateTime}
                     onSaveDetails={saveDetails}
+                    onSaveClock={saveClock}
                   />
                 ))
               )}
@@ -692,7 +704,7 @@ function ManualMatchForm({ teams, onAdd }) {
   );
 }
 
-function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveDateTime, onSaveDetails }) {
+function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveDateTime, onSaveDetails, onSaveClock }) {
   const [a, setA] = useState(match.scoreA ?? "");
   const [b, setB] = useState(match.scoreB ?? "");
   return (
@@ -706,6 +718,7 @@ function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveDateTime, onSav
         <button onClick={() => onDelete(match.id)} className="text-red-400/60 hover:text-red-400 text-xs">حذف</button>
       </div>
       {onSaveDateTime && <MatchDateTimeInputs match={match} onSave={onSaveDateTime} />}
+      {onSaveClock && <MatchClockControls match={match} onSaveClock={onSaveClock} />}
       {onSaveDetails && (
         <MatchDetailsPanel
           match={match}
@@ -714,6 +727,60 @@ function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveDateTime, onSav
           onSaveDetails={onSaveDetails}
         />
       )}
+    </div>
+  );
+}
+
+/* ساعة توقيت المباراة الحية: ابدأ / إيقاف مؤقت / تصفير — يعتمد عليها أيضًا العدّاد التنازلي للطرد */
+function useMatchClock(match) {
+  const clock = match.clock || { running: false, accumulated: 0, startedAt: null };
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    if (!clock.running) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [clock.running, clock.startedAt]);
+
+  const elapsedSeconds =
+    (clock.accumulated || 0) + (clock.running && clock.startedAt ? (now - clock.startedAt) / 1000 : 0);
+
+  return { clock, elapsedSeconds };
+}
+
+function MatchClockControls({ match, onSaveClock }) {
+  const { clock, elapsedSeconds } = useMatchClock(match);
+  const mm = Math.floor(elapsedSeconds / 60).toString().padStart(2, "0");
+  const ss = Math.floor(elapsedSeconds % 60).toString().padStart(2, "0");
+
+  function start() {
+    onSaveClock(match.id, { running: true, startedAt: Date.now(), accumulated: clock.accumulated || 0 });
+  }
+  function pause() {
+    const added = clock.startedAt ? (Date.now() - clock.startedAt) / 1000 : 0;
+    onSaveClock(match.id, { running: false, startedAt: null, accumulated: (clock.accumulated || 0) + added });
+  }
+  function reset() {
+    onSaveClock(match.id, { running: false, startedAt: null, accumulated: 0 });
+  }
+
+  return (
+    <div className="flex items-center gap-2 mt-1.5">
+      <span className={`font-display text-lg tabular-nums ${clock.running ? "text-green-400" : "text-gold2"}`}>
+        ⏱ {mm}:{ss}
+      </span>
+      {!clock.running ? (
+        <button onClick={start} className="text-[11px] px-2 py-1 rounded bg-green-500/20 text-green-300 border border-green-500/40 hover:bg-green-500/30">
+          ▶ ابدأ
+        </button>
+      ) : (
+        <button onClick={pause} className="text-[11px] px-2 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30">
+          ⏸ إيقاف مؤقت
+        </button>
+      )}
+      <button onClick={reset} className="text-[11px] px-2 py-1 rounded border border-white/15 text-white/50 hover:bg-white/5">
+        ↺ تصفير
+      </button>
     </div>
   );
 }
@@ -761,13 +828,17 @@ function MatchDetailsPanel({ match, teamA, teamB, onSaveDetails }) {
   const [lineups, setLineups] = useState(
     match.lineups || { A: { starting: [], subs: [] }, B: { starting: [], subs: [] } }
   );
+  const { elapsedSeconds } = useMatchClock(match);
+  const elapsedMinutes = elapsedSeconds / 60;
 
   const playersA = teamA?.players || [];
   const playersB = teamB?.players || [];
 
   function addEvent(side, type) {
     const players = side === "A" ? playersA : playersB;
-    setEvents([...events, { id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, side, type, playerId: players[0]?.id || "", minute: "" }]);
+    const base = { id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, side, type, playerId: players[0]?.id || "", minute: "" };
+    if (type === "red") base.suspensionMinutes = 5;
+    setEvents([...events, base]);
   }
   function updateEvent(idx, patch) {
     const list = [...events];
@@ -808,8 +879,8 @@ function MatchDetailsPanel({ match, teamA, teamB, onSaveDetails }) {
   return (
     <div className="mt-2 bg-black/20 rounded-lg p-3 space-y-3">
       <div className="grid sm:grid-cols-2 gap-3">
-        <EventSide label={teamA?.name} side="A" players={playersA} events={sorted} allEvents={events} onAdd={addEvent} onChange={updateEvent} onRemove={removeEvent} />
-        <EventSide label={teamB?.name} side="B" players={playersB} events={sorted} allEvents={events} onAdd={addEvent} onChange={updateEvent} onRemove={removeEvent} />
+        <EventSide label={teamA?.name} side="A" players={playersA} events={sorted} allEvents={events} onAdd={addEvent} onChange={updateEvent} onRemove={removeEvent} elapsedMinutes={elapsedMinutes} />
+        <EventSide label={teamB?.name} side="B" players={playersB} events={sorted} allEvents={events} onAdd={addEvent} onChange={updateEvent} onRemove={removeEvent} elapsedMinutes={elapsedMinutes} />
       </div>
 
       {allPlayersForMotm.length > 0 && (
@@ -898,7 +969,7 @@ function LineupSide({ label, players, lineup, onToggle }) {
   );
 }
 
-function EventSide({ label, side, players, allEvents, onAdd, onChange, onRemove }) {
+function EventSide({ label, side, players, allEvents, onAdd, onChange, onRemove, elapsedMinutes = 0 }) {
   const rows = allEvents
     .map((e, i) => ({ e, i }))
     .filter(({ e }) => e.side === side);
@@ -917,7 +988,7 @@ function EventSide({ label, side, players, allEvents, onAdd, onChange, onRemove 
       <p className="text-xs text-white/50 mb-1">{label}</p>
       <div className="space-y-1 mb-1.5">
         {rows.map(({ e, i }) => (
-          <div key={e.id} className="flex items-center gap-1">
+          <div key={e.id} className="flex items-center gap-1 flex-wrap">
             <span className="w-5 text-center text-xs">{e.type === "goal" ? "⚽" : e.type === "yellow" ? "🟨" : "🟥"}</span>
             <select value={e.playerId} onChange={(ev) => onChange(i, { playerId: ev.target.value })} className="flex-1 bg-black/30 border border-white/10 rounded px-1.5 py-1 text-xs outline-none focus:border-gold/50">
               {players.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -931,6 +1002,19 @@ function EventSide({ label, side, players, allEvents, onAdd, onChange, onRemove 
               placeholder="د"
               className="w-11 text-center bg-black/30 border border-white/10 rounded px-1 py-1 text-xs outline-none focus:border-gold/50"
             />
+            {e.type === "red" && (
+              <>
+                <input
+                  type="number"
+                  min="1"
+                  value={e.suspensionMinutes ?? 5}
+                  onChange={(ev) => onChange(i, { suspensionMinutes: Number(ev.target.value) })}
+                  title="مدة الطرد بالدقائق"
+                  className="w-11 text-center bg-black/30 border border-red-500/30 rounded px-1 py-1 text-[11px] outline-none focus:border-red-400"
+                />
+                <RedCardCountdown minute={e.minute} suspensionMinutes={e.suspensionMinutes ?? 5} elapsedMinutes={elapsedMinutes} />
+              </>
+            )}
             <button onClick={() => onRemove(i)} className="text-red-400/60 hover:text-red-400 text-xs">×</button>
           </div>
         ))}
@@ -942,6 +1026,19 @@ function EventSide({ label, side, players, allEvents, onAdd, onChange, onRemove 
       </div>
     </div>
   );
+}
+
+/* عدّاد تنازلي لوقت الطرد، مرتبط تلقائيًا بساعة توقيت المباراة الحية */
+function RedCardCountdown({ minute, suspensionMinutes, elapsedMinutes }) {
+  if (!minute) return <span className="text-[10px] text-white/25">حدّد الدقيقة</span>;
+  const endMinute = (Number(minute) || 0) + (Number(suspensionMinutes) || 0);
+  const remaining = endMinute - elapsedMinutes;
+  if (remaining <= 0) {
+    return <span className="text-[10px] text-white/30">انتهى وقت الطرد</span>;
+  }
+  const mm = Math.floor(remaining).toString().padStart(2, "0");
+  const ss = Math.floor((remaining % 1) * 60).toString().padStart(2, "0");
+  return <span className="text-[10px] text-red-300 font-display text-sm tabular-nums">⏳ {mm}:{ss}</span>;
 }
 
 /* ---------------- خروج المغلوب ---------------- */
@@ -1023,6 +1120,17 @@ function KnockoutTab({ data, refresh, flash, celebrate }) {
     }
   }
 
+  // بدون رسالة تأكيد في كل مرة (تُستخدم بكثرة عند بدء/إيقاف ساعة المباراة)
+  async function saveClock(matchId, clock) {
+    try {
+      await callApi(`/api/matches/${matchId}`, "PUT", { clock });
+      await refresh();
+    } catch (e) {
+      flash(e.message, true);
+    }
+  }
+
+
   async function deleteMatch(id) {
     if (!confirm("حذف هذه المباراة؟")) return;
     try {
@@ -1096,6 +1204,7 @@ function KnockoutTab({ data, refresh, flash, celebrate }) {
                       <button onClick={() => deleteMatch(m.id)} className="text-red-400/60 hover:text-red-400 text-xs">حذف</button>
                     </div>
                     <MatchDateTimeInputs match={m} onSave={saveDateTime} />
+                    <MatchClockControls match={m} onSaveClock={saveClock} />
                     {isTie && (
                       <div className="mt-2 text-xs text-amber-300/80 flex items-center gap-2">
                         تعادل — حدد الفائز يدويًا:
