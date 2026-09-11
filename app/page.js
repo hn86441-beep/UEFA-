@@ -4,7 +4,7 @@ import { useSearchParams } from "next/navigation";
 import Nav from "../components/Nav";
 import Confetti from "../components/Confetti";
 import { useLeagueData } from "../lib/useLeagueData";
-import { computeStandings, computeTopScorers, matchEventsTimeline, detectLeagueStage } from "../lib/logic";
+import { computeStandings, computeTopScorers, matchEventsTimeline, detectLeagueStage, computeRecordsBook } from "../lib/logic";
 import Link from "next/link";
 
 const TABS = [
@@ -12,6 +12,7 @@ const TABS = [
   { id: "groups", label: "المجموعات" },
   { id: "bracket", label: "خروج المغلوب" },
   { id: "awards", label: "الهدافون والجوائز" },
+  { id: "records", label: "الأرقام القياسية" },
 ];
 
 export default function HomePage() {
@@ -115,6 +116,7 @@ function HomeInner() {
             {tab === "groups" && <GroupsTab teams={teams} groups={groups} matches={matches} />}
             {tab === "bracket" && <BracketTab teams={teams} matches={matches} />}
             {tab === "awards" && <AwardsView teams={teams} matches={matches} settings={settings} />}
+            {tab === "records" && <RecordsBookView data={data} />}
           </div>
         </>
       )}
@@ -316,9 +318,15 @@ function MatchCard({ match, teamA, teamB }) {
   const timeline = matchEventsTimeline(match, teamA, teamB);
   const hasDetails = timeline.length > 0 || match.notes;
   const dateTimeLabel = formatMatchDateTime(match);
+  const isLive = match.clock?.running;
 
   return (
-    <div className="rounded-lg border border-white/10 overflow-hidden">
+    <div className={`rounded-lg border overflow-hidden ${isLive ? "border-red-500/40" : "border-white/10"}`}>
+      {isLive && (
+        <p className="text-[11px] text-red-400 text-center pt-1.5 flex items-center justify-center gap-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> مباشر الآن
+        </p>
+      )}
       {dateTimeLabel && (
         <p className="text-[11px] text-white/35 text-center pt-1.5">🕐 {dateTimeLabel}</p>
       )}
@@ -490,6 +498,71 @@ function AwardCard({ icon, label, name }) {
       <div className="text-4xl mb-2">{icon}</div>
       <p className="text-white/50 text-xs mb-1">{label}</p>
       <p className="font-display text-xl text-gold2">{name}</p>
+    </div>
+  );
+}
+
+/* ---------------- كتاب الأرقام القياسية (يجمع كل المواسم المؤرشفة + الحالي) ---------------- */
+function RecordsBookView({ data }) {
+  const records = computeRecordsBook(data);
+  const hasAny =
+    records.topScorerAllTime || records.biggestWin || records.longestStreak || records.mostTitles || records.firstChampion;
+
+  return (
+    <div>
+      <p className="text-center text-white/40 text-xs mb-6">
+        📚 مجموعة من {records.seasonsCount} موسم{records.seasonsCount > 1 ? "ًا" : ""} (شاملة الموسم الحالي)
+      </p>
+      {!hasAny ? (
+        <p className="text-white/40 text-center py-10">لا توجد أرقام قياسية كافية بعد — الأرقام تظهر تدريجيًا كلما لُعبت مباريات أكثر.</p>
+      ) : (
+        <div className="grid sm:grid-cols-2 gap-4">
+          {records.topScorerAllTime && (
+            <RecordCard icon="⚽" title="أكثر هداف في تاريخ الدوري">
+              <span className="font-display text-2xl text-gold2">{records.topScorerAllTime.name}</span>
+              <span className="text-white/50 text-sm"> — {records.topScorerAllTime.goals} هدف</span>
+            </RecordCard>
+          )}
+          {records.biggestWin && (
+            <RecordCard icon="🔥" title="أكبر فوز في تاريخ الدوري">
+              <span className="font-display text-2xl text-gold2">{records.biggestWin.winnerName}</span>
+              <span className="text-white/50 text-sm"> {records.biggestWin.score} على {records.biggestWin.loserName}</span>
+              <p className="text-white/30 text-xs mt-1">{records.biggestWin.season}</p>
+            </RecordCard>
+          )}
+          {records.longestStreak && (
+            <RecordCard icon="📈" title="أطول سلسلة انتصارات متتالية">
+              <span className="font-display text-2xl text-gold2">{records.longestStreak.teamName}</span>
+              <span className="text-white/50 text-sm"> — {records.longestStreak.count} فوزًا متتاليًا</span>
+              <p className="text-white/30 text-xs mt-1">{records.longestStreak.season}</p>
+            </RecordCard>
+          )}
+          {records.mostTitles && (
+            <RecordCard icon="👑" title="الفريق الأكثر تتويجًا">
+              <span className="font-display text-2xl text-gold2">{records.mostTitles.name}</span>
+              <span className="text-white/50 text-sm"> — {records.mostTitles.count} لقب</span>
+            </RecordCard>
+          )}
+          {records.firstChampion && (
+            <RecordCard icon="🏛️" title="أول بطل في تاريخ الدوري">
+              <span className="font-display text-2xl text-gold2">{records.firstChampion.name}</span>
+              <p className="text-white/30 text-xs mt-1">{records.firstChampion.season}</p>
+            </RecordCard>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RecordCard({ icon, title, children }) {
+  return (
+    <div className="glass-card rounded-2xl p-6">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-2xl">{icon}</span>
+        <h3 className="text-white/60 text-sm">{title}</h3>
+      </div>
+      <div>{children}</div>
     </div>
   );
 }
