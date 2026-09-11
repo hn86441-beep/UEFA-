@@ -15,6 +15,12 @@ import {
   drawKnockoutRound,
 } from "../../../lib/logic";
 
+// يمنع Vercel من تخزين استجابات هذا المسار مؤقتًا — كل طلب يجب أن يقرأ
+// أحدث بيانات من قاعدة البيانات مباشرة (وإلا قد يرى الزوار بيانات قديمة
+// حتى بعد حفظ تعديلات جديدة فعليًا).
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function ok(body, init) {
   return NextResponse.json(body, init);
 }
