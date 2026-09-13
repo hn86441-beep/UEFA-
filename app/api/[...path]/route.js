@@ -64,6 +64,19 @@ async function handleGET(req, { params }) {
     const authed = await isAuthedFromCookieHeader(req.headers.get("cookie") || "");
     return ok({ authed });
   }
+  // أداة تشخيص آمنة: تكشف فقط "هل المتغير موجود؟" (true/false) ولا تكشف قيمته الفعلية أبدًا
+  if (seg === "diag") {
+    return ok({
+      hasBlobToken: !!process.env.BLOB_READ_WRITE_TOKEN,
+      hasKvUrl: !!process.env.KV_REST_API_URL,
+      hasKvToken: !!process.env.KV_REST_API_TOKEN,
+      hasAdminPassword: !!process.env.ADMIN_PASSWORD,
+      hasSessionSecret: !!process.env.SESSION_SECRET,
+      vercelEnv: process.env.VERCEL_ENV || "غير معروف",
+      region: process.env.VERCEL_REGION || "غير معروف",
+      deploymentUrl: process.env.VERCEL_URL || "غير معروف",
+    });
+  }
   return fail("غير موجود", 404);
 }
 
