@@ -277,6 +277,104 @@ function SettingsTab({ data, refresh, flash }) {
           تفعيل صافرة الترحيب للزوار
         </label>
       </div>
+
+      <SoundClipsManager data={data} refresh={refresh} flash={flash} />
+    </div>
+  );
+}
+
+/* رفع مقاطع صوتية مخصّصة (هدف / تصدٍّ / إنذار / طرد) تحل محل الصوت الاصطناعي تلقائيًا */
+const SOUND_EVENT_TYPES = [
+  { id: "goal", label: "⚽ هدف", color: "gold" },
+  { id: "save", label: "🧤 تصدي حارس", color: "blue" },
+  { id: "yellow", label: "🟨 إنذار", color: "yellow" },
+  { id: "red", label: "🟥 طرد", color: "red" },
+];
+
+function SoundClipsManager({ data, refresh, flash }) {
+  const soundClips = data.settings?.soundClips || {};
+  const [uploading, setUploading] = useState(null);
+
+  async function uploadClip(type, file) {
+    if (!file) return;
+    if (file.size > 4 * 1024 * 1024) {
+      flash("الملف كبير جدًا — يُفضَّل مقاطع قصيرة أقل من 4 ميجابايت", true);
+      return;
+    }
+    setUploading(type);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("type", type);
+      const res = await fetch("/api/sounds/upload", { method: "POST", body: formData });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "تعذر رفع الملف");
+      await refresh();
+      flash("🎧 تم رفع المقطع الصوتي بنجاح");
+    } catch (e) {
+      flash(e.message, true);
+    } finally {
+      setUploading(null);
+    }
+  }
+
+  async function removeClip(type) {
+    try {
+      await callApi(`/api/sounds/${type}`, "DELETE");
+      await refresh();
+      flash("تم حذف المقطع — سيعود الصوت الاصطناعي التلقائي لهذا الحدث");
+    } catch (e) {
+      flash(e.message, true);
+    }
+  }
+
+  function preview(url) {
+    const audio = new Audio(url);
+    audio.play().catch(() => flash("تعذر تشغيل المعاينة", true));
+  }
+
+  return (
+    <div className="glass-card rounded-2xl p-6 max-w-2xl">
+      <h2 className="font-display text-2xl text-gold2 mb-2">🎙️ مقاطع صوتية مخصّصة لأحداث المباراة</h2>
+      <p className="text-white/50 text-sm mb-5">
+        ارفع مقطعك الصوتي الخاص لكل نوع حدث — بمجرد تسجيل هدف أو تصدٍّ أو بطاقة في أي مباراة مباشرة،
+        سيُشغَّل مقطعك تلقائيًا للزوار بدل الصوت الاصطناعي الافتراضي.
+      </p>
+      <div className="grid sm:grid-cols-2 gap-4">
+        {SOUND_EVENT_TYPES.map((t) => {
+          const url = soundClips[t.id];
+          return (
+            <div key={t.id} className="rounded-xl border border-white/10 p-4">
+              <p className="text-sm font-semibold mb-2">{t.label}</p>
+              {url ? (
+                <div className="flex items-center gap-2 mb-2">
+                  <button onClick={() => preview(url)} className="text-xs px-2.5 py-1.5 rounded bg-green-500/20 text-green-300 border border-green-500/40 hover:bg-green-500/30">
+                    ▶️ تجربة
+                  </button>
+                  <button onClick={() => removeClip(t.id)} className="text-xs px-2.5 py-1.5 rounded border border-red-500/40 text-red-300 hover:bg-red-500/10">
+                    حذف
+                  </button>
+                  <span className="text-[11px] text-white/30">مرفوع ✓</span>
+                </div>
+              ) : (
+                <p className="text-[11px] text-white/30 mb-2">لا يوجد مقطع مخصّص — يُستخدم الصوت الاصطناعي حاليًا.</p>
+              )}
+              <label className="block">
+                <span className="text-[11px] text-gold2/80 cursor-pointer hover:text-gold2">
+                  {uploading === t.id ? "⏳ جارِ الرفع..." : "📤 رفع / استبدال ملف"}
+                </span>
+                <input
+                  type="file"
+                  accept="audio/*"
+                  className="hidden"
+                  disabled={uploading === t.id}
+                  onChange={(e) => uploadClip(t.id, e.target.files?.[0])}
+                />
+              </label>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -860,7 +958,7 @@ function MatchDetailsPanel({ match, teamA, teamB, onSaveDetails }) {
   }
 
   const goalsCount = (match.events || []).filter((e) => e.type === "goal").length;
-  const cardsCount = (match.events || []).filter((e) => e.type !== "goal").length;
+  const cardsCount = (match.events || []).filter((e) => e.type === "yellow" || e.type === "red").length;
 
   if (!open) {
     return (
@@ -989,7 +1087,7 @@ function EventSide({ label, side, players, allEvents, onAdd, onChange, onRemove,
       <div className="space-y-1 mb-1.5">
         {rows.map(({ e, i }) => (
           <div key={e.id} className="flex items-center gap-1 flex-wrap">
-            <span className="w-5 text-center text-xs">{e.type === "goal" ? "⚽" : e.type === "yellow" ? "🟨" : "🟥"}</span>
+            <span className="w-5 text-center text-xs">{e.type === "goal" ? "⚽" : e.type === "save" ? "🧤" : e.type === "yellow" ? "🟨" : "🟥"}</span>
             <select value={e.playerId} onChange={(ev) => onChange(i, { playerId: ev.target.value })} className="flex-1 bg-black/30 border border-white/10 rounded px-1.5 py-1 text-xs outline-none focus:border-gold/50">
               {players.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
@@ -1019,8 +1117,9 @@ function EventSide({ label, side, players, allEvents, onAdd, onChange, onRemove,
           </div>
         ))}
       </div>
-      <div className="flex gap-1.5 text-[11px]">
+      <div className="flex gap-1.5 text-[11px] flex-wrap">
         <button onClick={() => onAdd(side, "goal")} className="text-gold2/70 hover:text-gold2">+ ⚽ هدف</button>
+        <button onClick={() => onAdd(side, "save")} className="text-blue-300/70 hover:text-blue-300">+ 🧤 تصدي</button>
         <button onClick={() => onAdd(side, "yellow")} className="text-yellow-300/70 hover:text-yellow-300">+ 🟨 إنذار</button>
         <button onClick={() => onAdd(side, "red")} className="text-red-400/70 hover:text-red-400">+ 🟥 طرد</button>
       </div>
