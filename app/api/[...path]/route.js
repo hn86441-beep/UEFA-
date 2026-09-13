@@ -81,6 +81,38 @@ async function handlePOST(req, { params }) {
   const seg = p.join("/");
   const authFail = await requireAuth(req, seg);
   if (authFail) return authFail;
+
+  // ---- رفع مقطع صوتي مخصّص لحدث معيّن (هدف / تصدٍّ / إنذار / طرد) ----
+  // يُعالَج قبل قراءة body كـ JSON لأن هذا الطلب يصل كـ multipart/form-data
+  if (seg === "sounds/upload") {
+    const SOUND_TYPES = ["goal", "save", "yellow", "red"];
+    try {
+      const formData = await req.formData();
+      const file = formData.get("file");
+      const type = formData.get("type");
+      if (!file || typeof file === "string") return fail("لم يتم إرفاق ملف صوتي");
+      if (!SOUND_TYPES.includes(type)) return fail("نوع الحدث غير معروف");
+      if (!process.env.BLOB_READ_WRITE_TOKEN) {
+        return fail(
+          "لم يتم ربط مساحة تخزين للملفات بعد. من مشروعك في Vercel اذهب إلى Storage → أضف Blob → اربطها بالمشروع → أعد النشر.",
+          500
+        );
+      }
+      const { put } = await import("@vercel/blob");
+      const safeName = file.name?.replace(/[^\w.\-]/g, "_") || "clip.mp3";
+      const blob = await put(`sounds/${type}-${Date.now()}-${safeName}`, file, {
+        access: "public",
+        addRandomSuffix: true,
+      });
+      const data = await getData();
+      data.settings.soundClips = { ...(data.settings.soundClips || {}), [type]: blob.url };
+      await saveData(data);
+      return ok({ url: blob.url, soundClips: data.settings.soundClips });
+    } catch (e) {
+      return fail("تعذر رفع الملف: " + e.message, 500);
+    }
+  }
+
   const body = await readBody(req);
 
   // ---- تسجيل الدخول / الخروج ----
@@ -349,6 +381,12 @@ async function handleDELETE(req, { params }) {
   const authFail = await requireAuth(req, p.join("/"));
   if (authFail) return authFail;
   const data = await getData();
+
+  if (p[0] === "sounds" && p.length === 2) {
+    if (data.settings.soundClips) delete data.settings.soundClips[p[1]];
+    await saveData(data);
+    return ok({ ok: true, soundClips: data.settings.soundClips || {} });
+  }
 
   if (p[0] === "players" && p.length === 3) {
     const team = data.teams.find((t) => t.id === p[1]);
