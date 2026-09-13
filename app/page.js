@@ -30,6 +30,8 @@ function HomeInner() {
   const [tab, setTab] = useState(initialTab);
   const [confettiTick, setConfettiTick] = useState(0);
   const [narrationOn, setNarrationOn] = useState(true);
+  const [flashEvent, setFlashEvent] = useState(null);
+  const flashTickRef = useRef(0);
   const whistlePlayed = useRef(false);
   const spokenEventIds = useRef(new Set());
   const narrationInitialized = useRef(false);
@@ -85,10 +87,22 @@ function HomeInner() {
       timeline.forEach((e) => {
         if (spokenEventIds.current.has(e.id)) return;
         spokenEventIds.current.add(e.id);
-        queueSpeak(generateCommentaryLine(e), e.type);
+
+        // مقطع صوتي مخصّص رفعه المشرف لهذا النوع من الأحداث إن وُجد، وإلا صوت اصطناعي تلقائي
+        const clipUrl = data.settings?.soundClips?.[e.type];
+        if (clipUrl) {
+          const audio = new Audio(clipUrl);
+          audio.play().catch(() => queueSpeak(generateCommentaryLine(e), e.type));
+        } else {
+          queueSpeak(generateCommentaryLine(e), e.type);
+        }
+
+        // ومضة لحظية على كامل الشاشة تجعل الموقع يشعر بالحيوية عند وقوع أي حدث حي
+        flashTickRef.current += 1;
+        setFlashEvent({ tick: flashTickRef.current, type: e.type });
       });
     });
-  }, [data?.matches, data?.teams, narrationOn]);
+  }, [data?.matches, data?.teams, data?.settings?.soundClips, narrationOn]);
 
   // كونفيتي خفيف عند أول فتح لتبويب الهدافون والجوائز في هذه الجلسة
   function handleTabChange(id) {
@@ -113,6 +127,7 @@ function HomeInner() {
   return (
     <Shell settings={settings}>
       <Confetti trigger={confettiTick} />
+      <LiveFlash event={flashEvent} />
       <div className={`stage-glow stage-${stage}`} />
 
       {championTeam && <CoronationBanner team={championTeam} settings={settings} />}
@@ -190,6 +205,20 @@ function CoronationBanner({ team, settings }) {
 }
 
 /* ==================== شريط مباريات اليوم ==================== */
+/* ومضة لحظية على كامل الشاشة عند وقوع أي حدث حي — تجعل الموقع يشعر بالحيوية */
+function LiveFlash({ event }) {
+  if (!event) return null;
+  const colorClass =
+    event.type === "goal"
+      ? "bg-gold/20"
+      : event.type === "red"
+      ? "bg-red-500/20"
+      : event.type === "save"
+      ? "bg-sky-400/15"
+      : "bg-yellow-300/15";
+  return <div key={event.tick} className={`fixed inset-0 pointer-events-none z-40 flash-pulse ${colorClass}`} />;
+}
+
 function TodaysMatchesBanner({ matches, teamById }) {
   return (
     <section className="glass-card rounded-2xl p-4 mb-6">
@@ -366,7 +395,7 @@ function cleanForSpeech(text) {
   return text
     .replace(/[ـ]+/g, "") // إزالة حرف المدّ (التطويل) الزخرفي
     .replace(/!{2,}/g, "!") // تبسيط علامات التعجب المتكررة
-    .replace(/[⚽🟨🟥🎙️🔊▶️]/gu, ""); // إزالة الرموز التعبيرية من النص المنطوق
+    .replace(/[⚽🧤🟨🟥🎙️🔊▶️]/gu, ""); // إزالة الرموز التعبيرية من النص المنطوق
 }
 
 // يختار أفضل صوت عربي متاح في المتصفح إن وُجد (صوت اصطناعي عام، وليس محاكاة لأي شخص)
@@ -379,6 +408,7 @@ function pickArabicVoice() {
 // إعدادات نطق أكثر حماسًا حسب نوع الحدث (أسرع وأعلى نبرة للأهداف، أهدأ للبطاقات)
 function excitementSettings(type) {
   if (type === "goal") return { rate: 1.15, pitch: 1.25 };
+  if (type === "save") return { rate: 1.1, pitch: 1.15 };
   if (type === "red") return { rate: 1.08, pitch: 0.9 };
   return { rate: 1.0, pitch: 1.0 };
 }
