@@ -295,22 +295,28 @@ function SoundClipsManager({ data, refresh, flash }) {
   const soundClips = data.settings?.soundClips || {};
   const [uploading, setUploading] = useState(null);
 
+  function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error("تعذر قراءة الملف"));
+      reader.readAsDataURL(file);
+    });
+  }
+
   async function uploadClip(type, file) {
     if (!file) return;
-    if (file.size > 4 * 1024 * 1024) {
-      flash("الملف كبير جدًا — يُفضَّل مقاطع قصيرة أقل من 4 ميجابايت", true);
+    // سقف آمن يتوافق مع حد الخادم (2 ميجابايت بعد الترميز) — كافٍ جدًا لمقطع أقل من 10 ثوانٍ
+    if (file.size > 1.4 * 1024 * 1024) {
+      flash("الملف كبير — يُفضَّل مقطع أقصر (أقل من 10 ثوانٍ) أو بجودة أقل", true);
       return;
     }
     setUploading(type);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("type", type);
-      const res = await fetch("/api/sounds/upload", { method: "POST", body: formData });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || "تعذر رفع الملف");
+      const dataUrl = await fileToDataUrl(file);
+      await callApi("/api/sounds/save", "POST", { type, dataUrl });
       await refresh();
-      flash("🎧 تم رفع المقطع الصوتي بنجاح");
+      flash("🎧 تم حفظ المقطع الصوتي بنجاح");
     } catch (e) {
       flash(e.message, true);
     } finally {
