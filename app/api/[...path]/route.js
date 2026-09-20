@@ -70,8 +70,8 @@ async function handleGET(req, { params }) {
   // أداة تشخيص آمنة: تكشف فقط "هل المتغير موجود؟" (true/false) ولا تكشف قيمته الفعلية أبدًا
   if (seg === "diag") {
     return ok({
-      hasKvUrl: !!process.env.KV_REST_API_URL,
-      hasKvToken: !!process.env.KV_REST_API_TOKEN,
+      hasUpstashUrl: !!process.env.UPSTASH_REDIS_REST_URL,
+      hasUpstashToken: !!process.env.UPSTASH_REDIS_REST_TOKEN,
       hasAdminPassword: !!process.env.ADMIN_PASSWORD,
       hasSessionSecret: !!process.env.SESSION_SECRET,
       vercelEnv: process.env.VERCEL_ENV || "غير معروف",
