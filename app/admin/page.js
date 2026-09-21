@@ -837,7 +837,7 @@ function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveDateTime, onSav
 
 /* ساعة توقيت المباراة الحية: ابدأ / إيقاف مؤقت / تصفير — يعتمد عليها أيضًا العدّاد التنازلي للطرد */
 function useMatchClock(match) {
-  const clock = match.clock || { running: false, accumulated: 0, startedAt: null };
+  const clock = match.clock || { running: false, totalSeconds: 900, remainingSeconds: 900, startedAt: null };
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -846,45 +846,105 @@ function useMatchClock(match) {
     return () => clearInterval(t);
   }, [clock.running, clock.startedAt]);
 
-  const elapsedSeconds =
-    (clock.accumulated || 0) + (clock.running && clock.startedAt ? (now - clock.startedAt) / 1000 : 0);
+  const liveRemaining =
+    (clock.remainingSeconds ?? clock.totalSeconds ?? 900) -
+    (clock.running && clock.startedAt ? (now - clock.startedAt) / 1000 : 0);
+  const remainingSeconds = Math.max(0, liveRemaining);
+  const totalSeconds = clock.totalSeconds || 900;
+  // الوقت "المنقضي" منذ بداية المباراة — تعتمد عليه ميزة العدّاد التنازلي لوقت الطرد
+  const elapsedSeconds = Math.max(0, totalSeconds - remainingSeconds);
+  const isFinished = remainingSeconds <= 0;
 
-  return { clock, elapsedSeconds };
+  return { clock, remainingSeconds, totalSeconds, elapsedSeconds, isFinished };
 }
 
-function MatchClockControls({ match, onSaveClock }) {
-  const { clock, elapsedSeconds } = useMatchClock(match);
-  const mm = Math.floor(elapsedSeconds / 60).toString().padStart(2, "0");
-  const ss = Math.floor(elapsedSeconds % 60).toString().padStart(2, "0");
+const CLOCK_PRESETS = [5, 10, 15, 20, 25, 30, 45, 90];
 
+function MatchClockControls({ match, onSaveClock }) {
+  const { clock, remainingSeconds, totalSeconds, isFinished } = useMatchClock(match);
+  const finishedNotified = useRef(false);
+  const mm = Math.floor(remainingSeconds / 60).toString().padStart(2, "0");
+  const ss = Math.floor(remainingSeconds % 60).toString().padStart(2, "0");
+  const urgent = clock.running && remainingSeconds <= 60 && remainingSeconds > 0;
+
+  // إيقاف تلقائي فور وصول العدّاد للصفر — بدون أي تدخل من المشرف
+  useEffect(() => {
+    if (isFinished && clock.running && !finishedNotified.current) {
+      finishedNotified.current = true;
+      onSaveClock(match.id, { running: false, startedAt: null, remainingSeconds: 0, totalSeconds: clock.totalSeconds });
+    }
+    if (!isFinished) finishedNotified.current = false;
+  }, [isFinished, clock.running]);
+
+  function setDuration(minutes) {
+    const seconds = minutes * 60;
+    onSaveClock(match.id, { running: false, startedAt: null, totalSeconds: seconds, remainingSeconds: seconds });
+  }
   function start() {
-    onSaveClock(match.id, { running: true, startedAt: Date.now(), accumulated: clock.accumulated || 0 });
+    if (remainingSeconds <= 0) return;
+    onSaveClock(match.id, { running: true, startedAt: Date.now(), totalSeconds, remainingSeconds });
   }
   function pause() {
-    const added = clock.startedAt ? (Date.now() - clock.startedAt) / 1000 : 0;
-    onSaveClock(match.id, { running: false, startedAt: null, accumulated: (clock.accumulated || 0) + added });
+    const elapsedSincePlay = clock.startedAt ? (Date.now() - clock.startedAt) / 1000 : 0;
+    const left = Math.max(0, (clock.remainingSeconds ?? totalSeconds) - elapsedSincePlay);
+    onSaveClock(match.id, { running: false, startedAt: null, totalSeconds, remainingSeconds: left });
   }
   function reset() {
-    onSaveClock(match.id, { running: false, startedAt: null, accumulated: 0 });
+    onSaveClock(match.id, { running: false, startedAt: null, totalSeconds, remainingSeconds: totalSeconds });
   }
 
+  const notStarted = !clock.running && remainingSeconds === totalSeconds;
+
   return (
-    <div className="flex items-center gap-2 mt-1.5">
-      <span className={`font-display text-lg tabular-nums ${clock.running ? "text-green-400" : "text-gold2"}`}>
-        ⏱ {mm}:{ss}
-      </span>
-      {!clock.running ? (
-        <button onClick={start} className="text-[11px] px-2 py-1 rounded bg-green-500/20 text-green-300 border border-green-500/40 hover:bg-green-500/30">
-          ▶ ابدأ
+    <div className="mt-1.5">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span
+          className={`font-display text-xl tabular-nums px-2 rounded transition-colors ${
+            isFinished
+              ? "text-red-400 bg-red-500/10"
+              : urgent
+              ? "text-red-300 animate-pulse"
+              : clock.running
+              ? "text-green-400"
+              : "text-gold2"
+          }`}
+        >
+          ⏱ {mm}:{ss}
+        </span>
+        {isFinished && <span className="text-[11px] text-red-300 font-semibold">⏰ انتهى الوقت!</span>}
+        {!clock.running ? (
+          <button
+            onClick={start}
+            disabled={remainingSeconds <= 0}
+            className="text-[11px] px-2 py-1 rounded bg-green-500/20 text-green-300 border border-green-500/40 hover:bg-green-500/30 disabled:opacity-30"
+          >
+            ▶ {remainingSeconds < totalSeconds && remainingSeconds > 0 ? "استئناف" : "ابدأ"}
+          </button>
+        ) : (
+          <button onClick={pause} className="text-[11px] px-2 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30">
+            ⏸ إيقاف مؤقت
+          </button>
+        )}
+        <button onClick={reset} className="text-[11px] px-2 py-1 rounded border border-white/15 text-white/50 hover:bg-white/5">
+          ↺ إعادة ضبط
         </button>
-      ) : (
-        <button onClick={pause} className="text-[11px] px-2 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30">
-          ⏸ إيقاف مؤقت
-        </button>
+      </div>
+      {notStarted && (
+        <div className="flex items-center gap-1 flex-wrap mt-1.5">
+          <span className="text-[10px] text-white/30 ml-1">مدة المباراة:</span>
+          {CLOCK_PRESETS.map((m) => (
+            <button
+              key={m}
+              onClick={() => setDuration(m)}
+              className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                totalSeconds === m * 60 ? "bg-gold/80 text-black border-gold" : "border-white/15 text-white/50 hover:bg-white/5"
+              }`}
+            >
+              {m}′
+            </button>
+          ))}
+        </div>
       )}
-      <button onClick={reset} className="text-[11px] px-2 py-1 rounded border border-white/15 text-white/50 hover:bg-white/5">
-        ↺ تصفير
-      </button>
     </div>
   );
 }
