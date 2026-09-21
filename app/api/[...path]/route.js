@@ -215,7 +215,7 @@ async function handlePOST(req, { params }) {
       notes: "",
       motm: null,
       lineups: { A: { starting: [], subs: [] }, B: { starting: [], subs: [] } },
-      clock: { running: false, accumulated: 0, startedAt: null },
+      clock: { running: false, totalSeconds: 900, remainingSeconds: 900, startedAt: null },
     };
     data.matches.push(match);
     await saveData(data);
