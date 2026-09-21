@@ -34,6 +34,7 @@ function HomeInner() {
   const flashTickRef = useRef(0);
   const whistlePlayed = useRef(false);
   const spokenEventIds = useRef(new Set());
+  const previouslyLiveRef = useRef(new Set());
   const narrationInitialized = useRef(false);
 
   // صافرة ترحيب خفيفة تُسمع مرة واحدة فقط لكل جلسة تصفح (يمكن تعطيلها من الإعدادات)
@@ -77,12 +78,14 @@ function HomeInner() {
       // أول مرة فقط: سجّل كل الأحداث الحالية كـ"مسموعة" دون نطقها، حتى لا نسرد كل شيء دفعة واحدة
       liveMatches.forEach((m) => {
         matchEventsTimeline(m, teamById[m.teamA], teamById[m.teamB]).forEach((e) => spokenEventIds.current.add(e.id));
+        previouslyLiveRef.current.add(m.id);
       });
       narrationInitialized.current = true;
       return;
     }
 
     liveMatches.forEach((m) => {
+      previouslyLiveRef.current.add(m.id);
       const timeline = matchEventsTimeline(m, teamById[m.teamA], teamById[m.teamB]);
       timeline.forEach((e) => {
         if (spokenEventIds.current.has(e.id)) return;
@@ -101,6 +104,20 @@ function HomeInner() {
         flashTickRef.current += 1;
         setFlashEvent({ tick: flashTickRef.current, type: e.type });
       });
+    });
+
+    // اكتشاف "نهاية الوقت" — مباراة كانت مباشرة وتوقفت الآن ووصل عدّادها للصفر تلقائيًا
+    const stillLiveIds = new Set(liveMatches.map((m) => m.id));
+    [...previouslyLiveRef.current].forEach((id) => {
+      if (stillLiveIds.has(id)) return; // ما زالت مباشرة، لا شيء يُفعل
+      previouslyLiveRef.current.delete(id);
+      const m = data.matches.find((mm) => mm.id === id);
+      const wasNaturalEnd = m && (m.clock?.remainingSeconds ?? 0) <= 0;
+      if (wasNaturalEnd) {
+        playFullTimeWhistle();
+        flashTickRef.current += 1;
+        setFlashEvent({ tick: flashTickRef.current, type: "fulltime" });
+      }
     });
   }, [data?.matches, data?.teams, data?.settings?.soundClips, narrationOn]);
 
@@ -215,6 +232,8 @@ function LiveFlash({ event }) {
       ? "bg-red-500/20"
       : event.type === "save"
       ? "bg-sky-400/15"
+      : event.type === "fulltime"
+      ? "bg-white/25"
       : "bg-yellow-300/15";
   return <div key={event.tick} className={`fixed inset-0 pointer-events-none z-40 flash-pulse ${colorClass}`} />;
 }
@@ -383,6 +402,30 @@ function GroupsTab({ teams, groups, matches }) {
 }
 
 /* بطاقة مباراة قابلة للتوسيع لعرض تقرير الأهداف بالدقيقة والإنذارات والملاحظات */
+/* عدّاد تنازلي مباشر للجمهور، يعتمد على نفس ساعة المباراة التي يتحكم بها المشرف */
+function LiveCountdown({ clock }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!clock?.running) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [clock?.running, clock?.startedAt]);
+
+  if (!clock) return null;
+  const remaining = Math.max(
+    0,
+    (clock.remainingSeconds ?? clock.totalSeconds ?? 0) - (clock.running && clock.startedAt ? (now - clock.startedAt) / 1000 : 0)
+  );
+  const mm = Math.floor(remaining / 60).toString().padStart(2, "0");
+  const ss = Math.floor(remaining % 60).toString().padStart(2, "0");
+  const urgent = remaining <= 60;
+  return (
+    <span className={`font-display text-sm tabular-nums ${urgent ? "animate-pulse" : ""}`}>
+      ⏱ {mm}:{ss}
+    </span>
+  );
+}
+
 function formatMatchDateTime(match) {
   if (!match.date && !match.time) return "";
   if (match.date && match.time) return `${match.date} — ${match.time}`;
@@ -446,6 +489,34 @@ function queueSpeak(text, type) {
   window.speechSynthesis.speak(buildUtterance(text, type));
 }
 
+// صافرة "نهاية الوقت" — نغمتان قصيرتان متتاليتان (صوت اصطناعي مُركَّب، وليس مسجَّلًا من أي شخص)
+// لتمييزها عن صافرة الترحيب الفردية عند فتح الموقع لأول مرة
+function playFullTimeWhistle() {
+  if (typeof window === "undefined") return;
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AudioCtx();
+    [0, 0.42].forEach((delay) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      const t0 = ctx.currentTime + delay;
+      osc.frequency.setValueAtTime(2200, t0);
+      osc.frequency.linearRampToValueAtTime(3100, t0 + 0.12);
+      osc.frequency.linearRampToValueAtTime(2400, t0 + 0.3);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.linearRampToValueAtTime(0.09, t0 + 0.03);
+      gain.gain.linearRampToValueAtTime(0.0001, t0 + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.36);
+    });
+  } catch {
+    /* تجاهل: بعض المتصفحات تمنع الصوت التلقائي، لا مشكلة */
+  }
+}
+
 function MatchCard({ match, teamA, teamB }) {
   const [open, setOpen] = useState(false);
   const timeline = matchEventsTimeline(match, teamA, teamB);
@@ -456,8 +527,11 @@ function MatchCard({ match, teamA, teamB }) {
   return (
     <div className={`rounded-lg border overflow-hidden ${isLive ? "border-red-500/40" : "border-white/10"}`}>
       {isLive && (
-        <p className="text-[11px] text-red-400 text-center pt-1.5 flex items-center justify-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> مباشر الآن
+        <p className="text-[11px] text-red-400 text-center pt-1.5 flex items-center justify-center gap-2">
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> مباشر الآن
+          </span>
+          <LiveCountdown clock={match.clock} />
         </p>
       )}
       {dateTimeLabel && (
@@ -545,6 +619,14 @@ function BracketTab({ teams, matches }) {
                         : "glass-card"
                     }`}
                   >
+                    {m.clock?.running && (
+                      <p className="text-[11px] text-red-400 text-center mb-2 flex items-center justify-center gap-2">
+                        <span className="flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> مباشر
+                        </span>
+                        <LiveCountdown clock={m.clock} />
+                      </p>
+                    )}
                     {formatMatchDateTime(m) && (
                       <p className="text-[11px] text-white/35 text-center mb-2">🕐 {formatMatchDateTime(m)}</p>
                     )}
