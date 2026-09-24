@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Nav from "../../components/Nav";
 import Confetti from "../../components/Confetti";
 import { useLeagueData, callApi } from "../../lib/useLeagueData";
