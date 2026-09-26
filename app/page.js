@@ -24,7 +24,11 @@ export default function HomePage() {
 }
 
 function HomeInner() {
-  const { data, loading, error } = useLeagueData({ poll: 12000 });
+  // نبدأ بتحديث معتدل، ثم نُسرعه تلقائيًا إلى كل 4 ثوانٍ فقط أثناء وجود مباراة مباشرة
+  // (لتظهر النتيجة والتعليق بسرعة أكبر وقت الحاجة الفعلية)، ونُبطئه إلى كل 20 ثانية
+  // في باقي الأوقات لتخفيف الحمل عن الموقع.
+  const [pollMs, setPollMs] = useState(10000);
+  const { data, loading, error } = useLeagueData({ poll: pollMs });
   const searchParams = useSearchParams();
   const initialTab = searchParams.get("tab") || "standings";
   const [tab, setTab] = useState(initialTab);
@@ -36,6 +40,12 @@ function HomeInner() {
   const spokenEventIds = useRef(new Set());
   const previouslyLiveRef = useRef(new Set());
   const narrationInitialized = useRef(false);
+
+  useEffect(() => {
+    if (!data?.matches) return;
+    const hasLive = data.matches.some((m) => m.clock?.running);
+    setPollMs(hasLive ? 2500 : 15000);
+  }, [data?.matches]);
 
   // صافرة ترحيب خفيفة تُسمع مرة واحدة فقط لكل جلسة تصفح (يمكن تعطيلها من الإعدادات)
   useEffect(() => {
@@ -136,6 +146,7 @@ function HomeInner() {
   const { teams, groups, matches, settings } = data;
   const stage = detectLeagueStage(data);
   const championTeam = settings?.championTeamId ? teams.find((t) => t.id === settings.championTeamId) : null;
+  const finalMatch = matches.find((m) => m.stage === "knockout" && m.round === "النهائي");
   const today = new Date().toISOString().slice(0, 10);
   const todaysMatches = matches.filter((m) => m.date === today);
   const teamById = Object.fromEntries(teams.map((t) => [t.id, t]));
@@ -148,6 +159,9 @@ function HomeInner() {
       <div className={`stage-glow stage-${stage}`} />
 
       {championTeam && <CoronationBanner team={championTeam} settings={settings} />}
+      {!championTeam && finalMatch && (
+        <GrandFinalBanner match={finalMatch} teamA={teamById[finalMatch.teamA]} teamB={teamById[finalMatch.teamB]} />
+      )}
 
       <StadiumHero settings={settings} />
 
@@ -204,6 +218,55 @@ function HomeInner() {
 }
 
 /* ==================== صفحة/شريط التتويج عند تحديد البطل ==================== */
+/* ==================== لافتة "ليلة النهائي الكبرى" ==================== */
+function GrandFinalBanner({ match, teamA, teamB }) {
+  const isLive = match.clock?.running;
+  const kickoff = match.date && match.time ? new Date(`${match.date}T${match.time}`) : null;
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    if (!kickoff || isLive) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [kickoff?.getTime(), isLive]);
+
+  let countdownLabel = null;
+  if (kickoff && !isLive) {
+    const diff = kickoff.getTime() - now;
+    if (diff > 0) {
+      const days = Math.floor(diff / 86400000);
+      const hours = Math.floor((diff % 86400000) / 3600000);
+      const mins = Math.floor((diff % 3600000) / 60000);
+      const secs = Math.floor((diff % 60000) / 1000);
+      countdownLabel =
+        days > 0
+          ? `${days} يوم و${hours} ساعة`
+          : `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    }
+  }
+
+  return (
+    <section className="relative overflow-hidden rounded-2xl mx-auto max-w-3xl mt-8 p-6 sm:p-8 text-center border-2 border-gold/70 bg-gradient-to-b from-[#241b0a] to-[#0b0d20] shadow-[0_0_35px_rgba(212,175,55,0.3)] pop-in">
+      <div className="absolute inset-0 stage-champion pointer-events-none" />
+      <p className="relative text-gold2/80 tracking-[0.3em] text-xs mb-2">🥇 ليلة النهائي الكبرى</p>
+      <div className="relative flex items-center justify-center gap-4 sm:gap-8 mb-2">
+        <span className="font-brand text-2xl sm:text-4xl text-white">{teamA?.name || "؟"}</span>
+        <span className="font-display text-xl text-gold2/60">VS</span>
+        <span className="font-brand text-2xl sm:text-4xl text-white">{teamB?.name || "؟"}</span>
+      </div>
+      {isLive ? (
+        <p className="relative text-red-400 text-sm flex items-center justify-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" /> النهائي مباشر الآن — كل شيء على المحك!
+        </p>
+      ) : countdownLabel ? (
+        <p className="relative font-display text-2xl text-gold2 tabular-nums">⏳ {countdownLabel}</p>
+      ) : (
+        <p className="relative text-white/50 text-sm">كل شيء على المحك — تابع لحظة الحسم لحظة بلحظة</p>
+      )}
+    </section>
+  );
+}
+
 function CoronationBanner({ team, settings }) {
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -597,28 +660,21 @@ function BracketTab({ teams, matches }) {
   return (
     <div className="flex items-center gap-3 overflow-x-auto pb-6 px-1">
       {rounds.map((roundLabel, ri) => {
-        const isFinal = ri === rounds.length - 1;
+        const isFinal = ri === rounds.length - 1 || roundLabel === "النهائي";
+        const theme = getRoundTheme(roundLabel, isFinal);
         const roundMatches = knockoutMatches.filter((m) => m.round === roundLabel);
         return (
           <div key={roundLabel} className="flex items-center gap-3">
             <div className="min-w-[240px]">
               <div className="text-center mb-4">
-                <h2 className={`font-display text-2xl ${isFinal ? "text-gold2" : "text-white/80"}`}>
-                  {isFinal && "🏆 "}
-                  {roundLabel}
+                <h2 className={`font-display text-2xl ${theme.title}`}>
+                  {theme.icon} {roundLabel}
                 </h2>
-                <div className="h-0.5 w-16 mx-auto mt-1 rounded-full" style={{ background: "linear-gradient(90deg, transparent, #d4af37, transparent)" }} />
+                <div className="h-0.5 w-16 mx-auto mt-1 rounded-full" style={{ background: theme.underline }} />
               </div>
               <div className="space-y-8">
                 {roundMatches.map((m) => (
-                  <div
-                    key={m.id}
-                    className={`rounded-xl p-4 ${
-                      isFinal
-                        ? "border-2 border-gold shadow-[0_0_25px_rgba(212,175,55,0.35)] bg-gradient-to-b from-[#1a1530] to-[#0b0d20]"
-                        : "glass-card"
-                    }`}
-                  >
+                  <div key={m.id} className={`rounded-xl p-4 ${theme.card}`}>
                     {m.clock?.running && (
                       <p className="text-[11px] text-red-400 text-center mb-2 flex items-center justify-center gap-2">
                         <span className="flex items-center gap-1">
@@ -650,6 +706,35 @@ function BracketTab({ teams, matches }) {
       })}
     </div>
   );
+}
+
+/* يمنح كل دور إقصائي هوية بصرية مميزة (برونزي/فضي/ذهبي) تطابق نفس ألوان لوحة التحكم */
+function getRoundTheme(roundLabel, isFinal) {
+  if (isFinal || roundLabel === "النهائي") {
+    return {
+      icon: "🥇",
+      title: "text-gold2",
+      underline: "linear-gradient(90deg, transparent, #d4af37, transparent)",
+      card: "border-2 border-gold shadow-[0_0_25px_rgba(212,175,55,0.35)] bg-gradient-to-b from-[#1a1530] to-[#0b0d20]",
+    };
+  }
+  if (roundLabel === "نصف النهائي") {
+    return {
+      icon: "🥈",
+      title: "text-slate-200",
+      underline: "linear-gradient(90deg, transparent, #cbd5e1, transparent)",
+      card: "border border-slate-300/30 bg-gradient-to-b from-[#1a2030] to-[#0b0d1a]",
+    };
+  }
+  if (roundLabel === "ربع النهائي") {
+    return {
+      icon: "🥉",
+      title: "text-orange-300",
+      underline: "linear-gradient(90deg, transparent, #c2703d, transparent)",
+      card: "border border-orange-700/25 glass-card",
+    };
+  }
+  return { icon: "", title: "text-white/80", underline: "linear-gradient(90deg, transparent, #d4af37, transparent)", card: "glass-card" };
 }
 
 function MatchLine({ name, score, isWinner, played }) {
