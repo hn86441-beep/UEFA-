@@ -1330,7 +1330,7 @@ function KnockoutTab({ data, refresh, flash, celebrate }) {
       <div className="glass-card rounded-2xl p-6">
         <h2 className="font-display text-2xl text-gold2 mb-3">قرعة دور إقصائي جديد</h2>
         <p className="text-white/50 text-sm mb-4">اختر الفرق المؤهلة لهذا الدور، ثم اضغط "إجراء القرعة" — سيتم تشكيل المباريات عشوائيًا بشكل زوجي.</p>
-        <input value={roundName} onChange={(e) => setRoundName(e.target.value)} placeholder="اسم الدور (مثال: ربع النهائي)" className="w-full max-w-xs mb-4 rounded-lg bg-black/30 border border-white/10 px-4 py-2.5 outline-none focus:border-gold/50" />
+        <RoundNamePicker value={roundName} onChange={setRoundName} />
         <div className="flex flex-wrap gap-2 mb-4">
           {data.teams.map((t) => (
             <button key={t.id} onClick={() => toggleTeam(t.id)} className={`px-3 py-1.5 rounded-lg text-sm border transition ${selected.includes(t.id) ? "bg-gold/90 text-black border-gold" : "border-white/15 text-white/70 hover:bg-white/5"}`}>
@@ -1396,29 +1396,84 @@ function KnockoutTab({ data, refresh, flash, celebrate }) {
 }
 
 /* نموذج إضافة مباراة إقصائية يدويًا (تحكم كامل، بدل الاعتماد فقط على القرعة العشوائية) */
+const ROUND_PRESETS = [
+  { name: "ربع النهائي", icon: "🥉", theme: "border-orange-700/50 text-orange-300 bg-orange-700/10", activeTheme: "bg-orange-700/80 text-white border-orange-600", tagline: "🥉 الطريق إلى القمة يبدأ الآن" },
+  { name: "نصف النهائي", icon: "🥈", theme: "border-slate-400/50 text-slate-200 bg-slate-400/10", activeTheme: "bg-slate-300 text-black border-slate-200", tagline: "🥈 على بعد خطوة واحدة من التاريخ" },
+  { name: "النهائي", icon: "🥇", theme: "border-gold/50 text-gold2 bg-gold/10", activeTheme: "bg-gold text-black border-gold2", tagline: "🥇 ليلة الحسم الكبرى — كل شيء على المحك!" },
+];
+
+function RoundNamePicker({ value, onChange }) {
+  const [customMode, setCustomMode] = useState(!ROUND_PRESETS.some((p) => p.name === value) && !!value);
+  const activePreset = ROUND_PRESETS.find((p) => p.name === value);
+
+  return (
+    <div className="mb-4">
+      <div className="flex flex-wrap gap-2 mb-2">
+        {ROUND_PRESETS.map((p) => {
+          const active = value === p.name;
+          return (
+            <button
+              key={p.name}
+              onClick={() => {
+                setCustomMode(false);
+                onChange(p.name);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-sm border font-semibold transition ${active ? p.activeTheme : p.theme + " hover:brightness-125"}`}
+            >
+              {p.icon} {p.name}
+            </button>
+          );
+        })}
+        <button
+          onClick={() => {
+            setCustomMode(true);
+            onChange("");
+          }}
+          className={`px-3 py-1.5 rounded-lg text-sm border font-semibold transition ${customMode ? "bg-white/20 text-white border-white/40" : "border-white/15 text-white/50 hover:bg-white/5"}`}
+        >
+          ✏️ اسم مخصّص
+        </button>
+      </div>
+      {customMode && (
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="اكتب اسم الدور (مثال: دور الـ16)"
+          className="w-full max-w-xs rounded-lg bg-black/30 border border-white/10 px-4 py-2 text-sm outline-none focus:border-gold/50"
+        />
+      )}
+      {activePreset && (
+        <p className="text-xs text-white/40 mt-1.5 pop-in">{activePreset.tagline}</p>
+      )}
+    </div>
+  );
+}
+
 function ManualKnockoutForm({ teams, onAdd }) {
   const [a, setA] = useState("");
   const [b, setB] = useState("");
-  const [round, setRound] = useState("");
+  const [round, setRound] = useState("ربع النهائي");
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <select value={a} onChange={(e) => setA(e.target.value)} className="rounded-lg bg-black/30 border border-white/10 px-3 py-2 text-sm outline-none focus:border-gold/50">
-        <option value="">الفريق الأول</option>
-        {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-      </select>
-      <span className="text-white/30 text-sm">ضد</span>
-      <select value={b} onChange={(e) => setB(e.target.value)} className="rounded-lg bg-black/30 border border-white/10 px-3 py-2 text-sm outline-none focus:border-gold/50">
-        <option value="">الفريق الثاني</option>
-        {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-      </select>
-      <input value={round} onChange={(e) => setRound(e.target.value)} placeholder="اسم الدور" className="rounded-lg bg-black/30 border border-white/10 px-3 py-2 text-sm outline-none focus:border-gold/50 w-32" />
-      <button
-        onClick={() => onAdd(a, b, round, () => { setA(""); setB(""); setRound(""); })}
-        className="px-3 py-2 rounded-lg bg-gold/90 text-black text-sm font-semibold hover:bg-gold2 transition"
-      >
-        إضافة المباراة
-      </button>
+    <div>
+      <RoundNamePicker value={round} onChange={setRound} />
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={a} onChange={(e) => setA(e.target.value)} className="rounded-lg bg-black/30 border border-white/10 px-3 py-2 text-sm outline-none focus:border-gold/50">
+          <option value="">الفريق الأول</option>
+          {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <span className="text-white/30 text-sm">ضد</span>
+        <select value={b} onChange={(e) => setB(e.target.value)} className="rounded-lg bg-black/30 border border-white/10 px-3 py-2 text-sm outline-none focus:border-gold/50">
+          <option value="">الفريق الثاني</option>
+          {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <button
+          onClick={() => onAdd(a, b, round, () => { setA(""); setB(""); })}
+          className="px-3 py-2 rounded-lg bg-gold/90 text-black text-sm font-semibold hover:bg-gold2 transition"
+        >
+          إضافة المباراة
+        </button>
+      </div>
     </div>
   );
 }
