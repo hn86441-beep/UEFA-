@@ -1,338 +1,962 @@
-'use client';
+"use client";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import Nav from "../components/Nav";
+import Confetti from "../components/Confetti";
+import { useLeagueData } from "../lib/useLeagueData";
+import { computeStandings, computeTopScorers, matchEventsTimeline, detectLeagueStage, computeRecordsBook, generateCommentaryLine } from "../lib/logic";
+import Link from "next/link";
 
-import React, { useState, useEffect } from 'react';
-import { 
-  Trophy, Medal, Flame, Shield, Activity, 
-  Upload, MessageSquare, Zap, Star, ThumbsUp, Radio
-} from 'lucide-react';
+const TABS = [
+  { id: "standings", label: "الترتيب" },
+  { id: "groups", label: "المجموعات" },
+  { id: "bracket", label: "خروج المغلوب" },
+  { id: "awards", label: "الهدافون والجوائز" },
+  { id: "records", label: "الأرقام القياسية" },
+];
 
-export default function VisitorPublicPage() {
-  // البيانات الديناميكية
-  const [leagueData, setLeagueData] = useState(null);
-  const [comments, setComments] = useState([]);
-  const [newComment, setNewComment] = useState('');
-  const [mediaFile, setMediaFile] = useState(null);
-  const [mediaPreview, setMediaPreview] = useState(null);
-  const [userVote, setUserVote] = useState(null);
+export default function HomePage() {
+  return (
+    <Suspense>
+      <HomeInner />
+    </Suspense>
+  );
+}
 
-  // جلب البيانات المخزنة للدوري والتعليقات
+function HomeInner() {
+  // نبدأ بتحديث معتدل، ثم نُسرعه تلقائيًا إلى كل 4 ثوانٍ فقط أثناء وجود مباراة مباشرة
+  // (لتظهر النتيجة والتعليق بسرعة أكبر وقت الحاجة الفعلية)، ونُبطئه إلى كل 20 ثانية
+  // في باقي الأوقات لتخفيف الحمل عن الموقع.
+  const [pollMs, setPollMs] = useState(10000);
+  const { data, loading, error } = useLeagueData({ poll: pollMs });
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get("tab") || "standings";
+  const [tab, setTab] = useState(initialTab);
+  const [confettiTick, setConfettiTick] = useState(0);
+  const [narrationOn, setNarrationOn] = useState(true);
+  const [flashEvent, setFlashEvent] = useState(null);
+  const flashTickRef = useRef(0);
+  const whistlePlayed = useRef(false);
+  const spokenEventIds = useRef(new Set());
+  const previouslyLiveRef = useRef(new Set());
+  const narrationInitialized = useRef(false);
+
   useEffect(() => {
-    const savedLeague = localStorage.getItem('champions_league_data');
-    if (savedLeague) {
-      try {
-        setLeagueData(JSON.parse(savedLeague));
-      } catch (e) {
-        console.error("خطأ في تحميل بيانات الدوري:", e);
+    if (!data?.matches) return;
+    const hasLive = data.matches.some((m) => m.clock?.running);
+    setPollMs(hasLive ? 2500 : 15000);
+  }, [data?.matches]);
+
+  // صافرة ترحيب خفيفة تُسمع مرة واحدة فقط لكل جلسة تصفح (يمكن تعطيلها من الإعدادات)
+  useEffect(() => {
+    if (!data?.settings) return;
+    if (data.settings.soundEnabled === false) return;
+    if (whistlePlayed.current) return;
+    if (typeof window === "undefined") return;
+    if (sessionStorage.getItem("cl_whistle_played")) return;
+    whistlePlayed.current = true;
+    sessionStorage.setItem("cl_whistle_played", "1");
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(2200, ctx.currentTime);
+      osc.frequency.linearRampToValueAtTime(3100, ctx.currentTime + 0.12);
+      osc.frequency.linearRampToValueAtTime(2400, ctx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 0.03);
+      gain.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.36);
+    } catch {
+      /* تجاهل: بعض المتصفحات تمنع الصوت التلقائي، لا مشكلة */
+    }
+  }, [data?.settings]);
+
+  // تعليق صوتي تلقائي حي: كل حدث جديد يُسجَّل في مباراة "مباشرة" يُنطق فور ظهوره
+  // بدون أي ضغط زر من الزائر — يبدأ فقط بعد أول تحديث لتجنّب سرد كل تاريخ المباراة دفعة واحدة
+  useEffect(() => {
+    if (!data?.matches || !narrationOn) return;
+    const teamById = Object.fromEntries((data.teams || []).map((t) => [t.id, t]));
+    const liveMatches = data.matches.filter((m) => m.clock?.running);
+
+    if (!narrationInitialized.current) {
+      // أول مرة فقط: سجّل كل الأحداث الحالية كـ"مسموعة" دون نطقها، حتى لا نسرد كل شيء دفعة واحدة
+      liveMatches.forEach((m) => {
+        matchEventsTimeline(m, teamById[m.teamA], teamById[m.teamB]).forEach((e) => spokenEventIds.current.add(e.id));
+        previouslyLiveRef.current.add(m.id);
+      });
+      narrationInitialized.current = true;
+      return;
+    }
+
+    liveMatches.forEach((m) => {
+      previouslyLiveRef.current.add(m.id);
+      const timeline = matchEventsTimeline(m, teamById[m.teamA], teamById[m.teamB]);
+      timeline.forEach((e) => {
+        if (spokenEventIds.current.has(e.id)) return;
+        spokenEventIds.current.add(e.id);
+
+        // مقطع صوتي مخصّص رفعه المشرف لهذا النوع من الأحداث إن وُجد، وإلا صوت اصطناعي تلقائي
+        const clipUrl = data.settings?.soundClips?.[e.type];
+        if (clipUrl) {
+          const audio = new Audio(clipUrl);
+          audio.play().catch(() => queueSpeak(generateCommentaryLine(e), e.type));
+        } else {
+          queueSpeak(generateCommentaryLine(e), e.type);
+        }
+
+        // ومضة لحظية على كامل الشاشة تجعل الموقع يشعر بالحيوية عند وقوع أي حدث حي
+        flashTickRef.current += 1;
+        setFlashEvent({ tick: flashTickRef.current, type: e.type });
+      });
+    });
+
+    // اكتشاف "نهاية الوقت" — مباراة كانت مباشرة وتوقفت الآن ووصل عدّادها للصفر تلقائيًا
+    const stillLiveIds = new Set(liveMatches.map((m) => m.id));
+    [...previouslyLiveRef.current].forEach((id) => {
+      if (stillLiveIds.has(id)) return; // ما زالت مباشرة، لا شيء يُفعل
+      previouslyLiveRef.current.delete(id);
+      const m = data.matches.find((mm) => mm.id === id);
+      const wasNaturalEnd = m && (m.clock?.remainingSeconds ?? 0) <= 0;
+      if (wasNaturalEnd) {
+        playFullTimeWhistle();
+        flashTickRef.current += 1;
+        setFlashEvent({ tick: flashTickRef.current, type: "fulltime" });
       }
+    });
+  }, [data?.matches, data?.teams, data?.settings?.soundClips, narrationOn]);
+
+  // كونفيتي خفيف عند أول فتح لتبويب الهدافون والجوائز في هذه الجلسة
+  function handleTabChange(id) {
+    setTab(id);
+    if (id === "awards" && typeof window !== "undefined" && !sessionStorage.getItem("cl_awards_confetti")) {
+      sessionStorage.setItem("cl_awards_confetti", "1");
+      setConfettiTick((t) => t + 1);
     }
+  }
 
-    const savedComments = localStorage.getItem('champions_league_comments');
-    if (savedComments) {
-      try {
-        setComments(JSON.parse(savedComments));
-      } catch (e) {
-        console.error("خطأ في تحميل التعليقات:", e);
-      }
-    }
-  }, []);
+  if (loading) return <Shell><p className="text-center text-white/40 font-display text-2xl py-24">جارِ تحميل الدوري...</p></Shell>;
+  if (error || !data) return <Shell><p className="text-center text-white/60 py-24">تعذر تحميل البيانات{error ? `: ${error}` : ""}</p></Shell>;
 
-  // معالجة رفع مقاطع الميديا وقراءتها كـ Base64 لتبقى محفوظة
-  const handleMediaUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setMediaFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setMediaPreview(reader.result);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  // إضافة تعليق أو لقطة ضربة جزاء
-  const handleAddComment = (e) => {
-    e.preventDefault();
-    if (!newComment.trim() && !mediaPreview) return;
-
-    const newEntry = {
-      id: Date.now(),
-      text: newComment,
-      media: mediaPreview,
-      mediaType: mediaFile?.type.startsWith('video') ? 'video' : 'image',
-      time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
-      likes: 0
-    };
-
-    const updatedComments = [newEntry, ...comments];
-    setComments(updatedComments);
-    localStorage.setItem('champions_league_comments', JSON.stringify(updatedComments));
-    
-    // إعادة تعيين المدخلات
-    setNewComment('');
-    setMediaFile(null);
-    setMediaPreview(null);
-  };
-
-  // إعجاب بالتعليق
-  const handleLike = (id) => {
-    const updated = comments.map(c => c.id === id ? { ...c, likes: c.likes + 1 } : c);
-    setComments(updated);
-    localStorage.setItem('champions_league_comments', JSON.stringify(updated));
-  };
-
-  // بيانات افتراضية في حال عدم وجود بيانات مخزنة بعد
-  const teams = leagueData?.teams || [
-    { name: 'فريق الأبطال', played: 3, points: 9, goals: 8 },
-    { name: 'فريق النجوم', played: 3, points: 6, goals: 5 },
-    { name: 'فريق التحدي', played: 3, points: 3, goals: 3 },
-  ];
-
-  const topScorer = leagueData?.topScorer || { name: 'اللاعب المبدع', goals: 5, team: 'فريق الأبطال' };
-  const featuredMatch = leagueData?.lastMatch || { teamA: 'فريق الأبطال', scoreA: 3, scoreB: 2, teamB: 'فريق النجوم' };
+  const { teams, groups, matches, settings } = data;
+  const stage = detectLeagueStage(data);
+  const championTeam = settings?.championTeamId ? teams.find((t) => t.id === settings.championTeamId) : null;
+  const finalMatch = matches.find((m) => m.stage === "knockout" && m.round === "النهائي");
+  const today = new Date().toISOString().slice(0, 10);
+  const todaysMatches = matches.filter((m) => m.date === today);
+  const teamById = Object.fromEntries(teams.map((t) => [t.id, t]));
+  const hasLiveMatch = matches.some((m) => m.clock?.running);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans dir-rtl">
-      
-      {/* شريط الأنباء والبث المباشر */}
-      <div className="bg-amber-500 text-slate-950 font-bold text-xs py-2 px-4 flex items-center justify-between shadow-md">
-        <div className="flex items-center gap-2">
-          <Radio className="w-4 h-4 animate-pulse text-red-700" />
-          <span>تغطية حية: متابعة نتائج مباريات دوري الأبطال واللقطات المباشرة</span>
-        </div>
-        <span className="hidden md:inline bg-slate-950 text-amber-400 px-2 py-0.5 rounded text-[10px]">
-          شاشة الزوار
-        </span>
+    <Shell settings={settings}>
+      <Confetti trigger={confettiTick} />
+      <LiveFlash event={flashEvent} />
+      <div className={`stage-glow stage-${stage}`} />
+
+      {championTeam && <CoronationBanner team={championTeam} settings={settings} />}
+      {!championTeam && finalMatch && (
+        <GrandFinalBanner match={finalMatch} teamA={teamById[finalMatch.teamA]} teamB={teamById[finalMatch.teamB]} />
+      )}
+
+      <StadiumHero settings={settings} />
+
+      {teams.length === 0 ? (
+        <EmptyState />
+      ) : (
+        <>
+          {hasLiveMatch && (
+            <div className="flex justify-center mb-4">
+              <button
+                onClick={() => {
+                  setNarrationOn((v) => !v);
+                  if (narrationOn && typeof window !== "undefined") window.speechSynthesis?.cancel();
+                }}
+                className={`text-xs px-4 py-2 rounded-full border flex items-center gap-2 transition ${
+                  narrationOn ? "border-gold/50 text-gold2 bg-gold/10" : "border-white/15 text-white/40"
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${narrationOn ? "bg-red-500 animate-pulse" : "bg-white/30"}`} />
+                🎙️ التعليق الصوتي المباشر {narrationOn ? "مفعّل" : "معطّل"}
+              </button>
+            </div>
+          )}
+
+          {todaysMatches.length > 0 && (
+            <TodaysMatchesBanner matches={todaysMatches} teamById={teamById} />
+          )}
+
+          <div className="flex justify-center gap-2 mb-8 flex-wrap">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => handleTabChange(t.id)}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+                  tab === t.id ? "bg-gold/90 text-black" : "glass-card text-white/70 hover:text-white"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div key={tab} className="tab-transition">
+            {tab === "standings" && <StandingsTab teams={teams} groups={groups} matches={matches} />}
+            {tab === "groups" && <GroupsTab teams={teams} groups={groups} matches={matches} />}
+            {tab === "bracket" && <BracketTab teams={teams} matches={matches} />}
+            {tab === "awards" && <AwardsView teams={teams} matches={matches} settings={settings} />}
+            {tab === "records" && <RecordsBookView data={data} />}
+          </div>
+        </>
+      )}
+    </Shell>
+  );
+}
+
+/* ==================== صفحة/شريط التتويج عند تحديد البطل ==================== */
+/* ==================== لافتة "ليلة النهائي الكبرى" ==================== */
+function GrandFinalBanner({ match, teamA, teamB }) {
+  const isLive = match.clock?.running;
+  const kickoff = match.date && match.time ? new Date(`${match.date}T${match.time}`) : null;
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    if (!kickoff || isLive) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [kickoff?.getTime(), isLive]);
+
+  let countdownLabel = null;
+  if (kickoff && !isLive) {
+    const diff = kickoff.getTime() - now;
+    if (diff > 0) {
+      const days = Math.floor(diff / 86400000);
+      const hours = Math.floor((diff % 86400000) / 3600000);
+      const mins = Math.floor((diff % 3600000) / 60000);
+      const secs = Math.floor((diff % 60000) / 1000);
+      countdownLabel =
+        days > 0
+          ? `${days} يوم و${hours} ساعة`
+          : `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    }
+  }
+
+  return (
+    <section className="relative overflow-hidden rounded-2xl mx-auto max-w-3xl mt-8 p-6 sm:p-8 text-center border-2 border-gold/70 bg-gradient-to-b from-[#241b0a] to-[#0b0d20] shadow-[0_0_35px_rgba(212,175,55,0.3)] pop-in">
+      <div className="absolute inset-0 stage-champion pointer-events-none" />
+      <p className="relative text-gold2/80 tracking-[0.3em] text-xs mb-2">🥇 ليلة النهائي الكبرى</p>
+      <div className="relative flex items-center justify-center gap-4 sm:gap-8 mb-2">
+        <span className="font-brand text-2xl sm:text-4xl text-white">{teamA?.name || "؟"}</span>
+        <span className="font-display text-xl text-gold2/60">VS</span>
+        <span className="font-brand text-2xl sm:text-4xl text-white">{teamB?.name || "؟"}</span>
+      </div>
+      {isLive ? (
+        <p className="relative text-red-400 text-sm flex items-center justify-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" /> النهائي مباشر الآن — كل شيء على المحك!
+        </p>
+      ) : countdownLabel ? (
+        <p className="relative font-display text-2xl text-gold2 tabular-nums">⏳ {countdownLabel}</p>
+      ) : (
+        <p className="relative text-white/50 text-sm">كل شيء على المحك — تابع لحظة الحسم لحظة بلحظة</p>
+      )}
+    </section>
+  );
+}
+
+function CoronationBanner({ team, settings }) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    setTick(1);
+  }, []);
+  return (
+    <section className="relative overflow-hidden rounded-2xl mx-auto max-w-3xl mt-8 p-8 text-center border-2 border-gold bg-gradient-to-b from-[#241b0a] to-[#0b0d20] shadow-[0_0_40px_rgba(212,175,55,0.35)] pop-in">
+      <Confetti trigger={tick} />
+      <p className="text-gold2/80 tracking-[0.3em] text-xs mb-2">🏆 بطل الموسم {settings?.season}</p>
+      <h2 className="font-brand text-5xl sm:text-6xl gold-text mb-2">{team.name}</h2>
+      {settings?.awards?.bestPlayer && (
+        <p className="text-white/60 text-sm">⭐ أفضل لاعب في الموسم: {settings.awards.bestPlayer}</p>
+      )}
+    </section>
+  );
+}
+
+/* ==================== شريط مباريات اليوم ==================== */
+/* ومضة لحظية على كامل الشاشة عند وقوع أي حدث حي — تجعل الموقع يشعر بالحيوية */
+function LiveFlash({ event }) {
+  if (!event) return null;
+  const colorClass =
+    event.type === "goal"
+      ? "bg-gold/20"
+      : event.type === "red"
+      ? "bg-red-500/20"
+      : event.type === "save"
+      ? "bg-sky-400/15"
+      : event.type === "fulltime"
+      ? "bg-white/25"
+      : "bg-yellow-300/15";
+  return <div key={event.tick} className={`fixed inset-0 pointer-events-none z-40 flash-pulse ${colorClass}`} />;
+}
+
+function TodaysMatchesBanner({ matches, teamById }) {
+  return (
+    <section className="glass-card rounded-2xl p-4 mb-6">
+      <h3 className="font-display text-xl text-gold2 mb-2 text-center">⚡ مباريات اليوم</h3>
+      <div className="grid sm:grid-cols-2 gap-2">
+        {matches.map((m) => (
+          <div key={m.id} className="flex items-center justify-between text-sm rounded-lg border border-gold/20 px-3 py-2">
+            <span className="truncate">{teamById[m.teamA]?.name}</span>
+            <span className="text-gold2 text-xs px-2">{m.time || "🕐"}</span>
+            <span className="truncate text-left">{teamById[m.teamB]?.name}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Shell({ children, settings }) {
+  return (
+    <>
+      <Nav leagueName={settings?.leagueName} />
+      <main className="max-w-6xl mx-auto px-4 pb-24">{children}</main>
+    </>
+  );
+}
+
+/* ==================== الهيرو: ملعب + أضواء كاشفة + شعار أصلي ==================== */
+function StadiumHero({ settings }) {
+  return (
+    <section className="relative pt-10 pb-6 text-center overflow-hidden">
+      <div className="relative mx-auto max-w-2xl h-56 sm:h-72 mb-2">
+        <svg viewBox="0 0 600 300" className="w-full h-full" preserveAspectRatio="xMidYMax meet">
+          <defs>
+            <linearGradient id="beam" x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0%" stopColor="#f3d675" stopOpacity="0.55" />
+              <stop offset="100%" stopColor="#f3d675" stopOpacity="0" />
+            </linearGradient>
+            <linearGradient id="beamPurple" x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0%" stopColor="#b17ef0" stopOpacity="0.4" />
+              <stop offset="100%" stopColor="#b17ef0" stopOpacity="0" />
+            </linearGradient>
+            <radialGradient id="crestGlow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="#fff6da" />
+              <stop offset="55%" stopColor="#e7c465" />
+              <stop offset="100%" stopColor="#8a6a1f" />
+            </radialGradient>
+            <linearGradient id="bowl" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#182046" />
+              <stop offset="100%" stopColor="#070b1a" />
+            </linearGradient>
+          </defs>
+
+          {[70, 160, 240, 320, 400, 490].map((x, i) => (
+            <polygon
+              key={x}
+              points={`${x - 6},260 ${x + 6},260 ${x + (i % 2 ? 60 : -60)},20 ${x + (i % 2 ? 30 : -30)},20`}
+              fill={i % 3 === 0 ? "url(#beamPurple)" : "url(#beam)"}
+              opacity="0.8"
+            />
+          ))}
+
+          <path
+            d="M40,270 Q300,150 560,270 L560,290 Q300,190 40,290 Z"
+            fill="url(#bowl)"
+            stroke="#d4af37"
+            strokeOpacity="0.35"
+            strokeWidth="1.5"
+          />
+          <path
+            d="M90,265 Q300,175 510,265"
+            fill="none"
+            stroke="#d4af37"
+            strokeOpacity="0.25"
+            strokeWidth="1"
+          />
+
+          {[95, 505].map((x) => (
+            <g key={x}>
+              <rect x={x - 2} y="150" width="4" height="115" fill="#0e1430" />
+              <circle cx={x} cy="145" r="9" fill="#f3d675" opacity="0.9" />
+              <circle cx={x} cy="145" r="18" fill="#f3d675" opacity="0.25" />
+            </g>
+          ))}
+
+          <g transform="translate(300,95)">
+            <circle r="42" fill="url(#crestGlow)" opacity="0.16" />
+            <path
+              d="M0,-30 L8,-9 L30,-9 L12,4 L19,26 L0,12 L-19,26 L-12,4 L-30,-9 L-8,-9 Z"
+              fill="url(#crestGlow)"
+              stroke="#fff6da"
+              strokeWidth="0.6"
+            />
+            <circle r="46" fill="none" stroke="#d4af37" strokeOpacity="0.5" strokeWidth="1" />
+          </g>
+        </svg>
       </div>
 
-      {/* Header السينمائي */}
-      <header className="relative overflow-hidden bg-gradient-to-r from-blue-950 via-indigo-950 to-slate-950 border-b border-indigo-500/20 py-8 px-6 shadow-2xl">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 relative z-10">
-          <div className="flex items-center gap-4">
-            <div className="p-4 bg-gradient-to-br from-amber-400 to-yellow-600 rounded-2xl shadow-lg shadow-yellow-500/20">
-              <Trophy className="w-10 h-10 text-slate-950" />
+      <p className="font-display text-gold2/80 tracking-[0.3em] text-sm mb-2">
+        موسم {settings?.season}
+      </p>
+      <h1 className="font-brand text-5xl sm:text-7xl gold-text leading-none mb-2">
+        {settings?.leagueName}
+      </h1>
+      <p className="text-white/40 text-sm">ليلة الأبطال تبدأ هنا</p>
+    </section>
+  );
+}
+
+/* ---------------- تبويب الترتيب ---------------- */
+function StandingsTab({ teams, groups, matches }) {
+  if (groups.length > 0) {
+    return (
+      <section className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {groups.map((g) => {
+          const table = computeStandings(teams, matches, g.id);
+          return (
+            <div key={g.id} className="glass-card rounded-2xl p-4">
+              <h3 className="font-display text-2xl text-gold2 mb-3">المجموعة {g.name}</h3>
+              <MiniTable table={table} />
             </div>
-            <div>
-              <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-yellow-300 via-amber-200 to-white">
-                دوري الأبطال
-              </h1>
-              <p className="text-indigo-300 text-xs md:text-sm mt-1 flex items-center gap-2">
-                <Activity className="w-4 h-4 text-emerald-400 animate-spin" />
-                عرض النتائج، الإحصائيات، ولقطات ضربات الجزاء
-              </p>
+          );
+        })}
+      </section>
+    );
+  }
+  return (
+    <section className="glass-card rounded-2xl p-4">
+      <h3 className="font-display text-2xl text-gold2 mb-3">جدول الترتيب العام</h3>
+      <FullTable teams={[...teams].sort((a, b) => b.points - a.points)} />
+    </section>
+  );
+}
+
+/* ---------------- تبويب المجموعات ---------------- */
+function GroupsTab({ teams, groups, matches }) {
+  const teamById = Object.fromEntries(teams.map((t) => [t.id, t]));
+  if (groups.length === 0) return <p className="text-white/40 text-center py-10">لم تُنشأ مجموعات بعد.</p>;
+
+  return (
+    <div className="space-y-8">
+      {groups.map((g) => {
+        const table = computeStandings(teams, matches, g.id);
+        const groupMatches = matches.filter((m) => m.stage === "group" && m.group === g.id);
+        return (
+          <section key={g.id} className="glass-card rounded-2xl p-6">
+            <h2 className="font-display text-3xl text-gold2 mb-4">المجموعة {g.name}</h2>
+            <div className="overflow-x-auto mb-6">
+              <FullTable teams={table} />
             </div>
+            {groupMatches.length > 0 && (
+              <div className="grid sm:grid-cols-2 gap-2">
+                {groupMatches.map((m) => (
+                  <MatchCard key={m.id} match={m} teamA={teamById[m.teamA]} teamB={teamById[m.teamB]} />
+                ))}
+              </div>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+/* بطاقة مباراة قابلة للتوسيع لعرض تقرير الأهداف بالدقيقة والإنذارات والملاحظات */
+/* عدّاد تنازلي مباشر للجمهور، يعتمد على نفس ساعة المباراة التي يتحكم بها المشرف */
+function LiveCountdown({ clock }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!clock?.running) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [clock?.running, clock?.startedAt]);
+
+  if (!clock) return null;
+  const remaining = Math.max(
+    0,
+    (clock.remainingSeconds ?? clock.totalSeconds ?? 0) - (clock.running && clock.startedAt ? (now - clock.startedAt) / 1000 : 0)
+  );
+  const mm = Math.floor(remaining / 60).toString().padStart(2, "0");
+  const ss = Math.floor(remaining % 60).toString().padStart(2, "0");
+  const urgent = remaining <= 60;
+  return (
+    <span className={`font-display text-sm tabular-nums ${urgent ? "animate-pulse" : ""}`}>
+      ⏱ {mm}:{ss}
+    </span>
+  );
+}
+
+function formatMatchDateTime(match) {
+  if (!match.date && !match.time) return "";
+  if (match.date && match.time) return `${match.date} — ${match.time}`;
+  return match.date || match.time;
+}
+
+// ينظّف النص المكتوب (المزخرف بصريًا بشرطات وعلامات تعجب متكررة) قبل نطقه
+// حتى يخرج الصوت واضحًا بدل أن يقرأ الرموز الزخرفية حرفيًا
+function cleanForSpeech(text) {
+  return text
+    .replace(/[ـ]+/g, "") // إزالة حرف المدّ (التطويل) الزخرفي
+    .replace(/!{2,}/g, "!") // تبسيط علامات التعجب المتكررة
+    .replace(/[⚽🧤🟨🟥🎙️🔊▶️]/gu, ""); // إزالة الرموز التعبيرية من النص المنطوق
+}
+
+// يختار أفضل صوت عربي متاح في المتصفح إن وُجد (صوت اصطناعي عام، وليس محاكاة لأي شخص)
+function pickArabicVoice() {
+  if (typeof window === "undefined" || !window.speechSynthesis) return null;
+  const voices = window.speechSynthesis.getVoices();
+  return voices.find((v) => v.lang?.toLowerCase().startsWith("ar")) || null;
+}
+
+// إعدادات نطق أكثر حماسًا حسب نوع الحدث (أسرع وأعلى نبرة للأهداف، أهدأ للبطاقات)
+function excitementSettings(type) {
+  if (type === "goal") return { rate: 1.15, pitch: 1.25 };
+  if (type === "save") return { rate: 1.1, pitch: 1.15 };
+  if (type === "red") return { rate: 1.08, pitch: 0.9 };
+  return { rate: 1.0, pitch: 1.0 };
+}
+
+function buildUtterance(text, type) {
+  const utter = new SpeechSynthesisUtterance(cleanForSpeech(text));
+  utter.lang = "ar-SA";
+  const { rate, pitch } = excitementSettings(type);
+  utter.rate = rate;
+  utter.pitch = pitch;
+  const voice = pickArabicVoice();
+  if (voice) utter.voice = voice;
+  return utter;
+}
+
+// نطق فوري (يقاطع أي نطق سابق) — يُستخدم عند ضغط الزائر على زر 🔊 يدويًا
+function speak(text, type) {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(buildUtterance(text, type));
+}
+
+// نطق كل أحداث المباراة بالترتيب، حدثًا تلو الآخر (يقاطع أي نطق سابق)
+function speakAll(timeline) {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  timeline.forEach((e) => {
+    window.speechSynthesis.speak(buildUtterance(generateCommentaryLine(e), e.type));
+  });
+}
+
+// نطق تلقائي حي بدون مقاطعة ما يُقال حاليًا — يُستخدم للتعليق التلقائي على المباريات المباشرة
+function queueSpeak(text, type) {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  window.speechSynthesis.speak(buildUtterance(text, type));
+}
+
+// صافرة "نهاية الوقت" — نغمتان قصيرتان متتاليتان (صوت اصطناعي مُركَّب، وليس مسجَّلًا من أي شخص)
+// لتمييزها عن صافرة الترحيب الفردية عند فتح الموقع لأول مرة
+function playFullTimeWhistle() {
+  if (typeof window === "undefined") return;
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AudioCtx();
+    [0, 0.42].forEach((delay) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      const t0 = ctx.currentTime + delay;
+      osc.frequency.setValueAtTime(2200, t0);
+      osc.frequency.linearRampToValueAtTime(3100, t0 + 0.12);
+      osc.frequency.linearRampToValueAtTime(2400, t0 + 0.3);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.linearRampToValueAtTime(0.09, t0 + 0.03);
+      gain.gain.linearRampToValueAtTime(0.0001, t0 + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.36);
+    });
+  } catch {
+    /* تجاهل: بعض المتصفحات تمنع الصوت التلقائي، لا مشكلة */
+  }
+}
+
+function MatchCard({ match, teamA, teamB }) {
+  const [open, setOpen] = useState(false);
+  const timeline = matchEventsTimeline(match, teamA, teamB);
+  const hasDetails = timeline.length > 0 || match.notes;
+  const dateTimeLabel = formatMatchDateTime(match);
+  const isLive = match.clock?.running;
+
+  return (
+    <div className={`rounded-lg border overflow-hidden ${isLive ? "border-red-500/40" : "border-white/10"}`}>
+      {isLive && (
+        <p className="text-[11px] text-red-400 text-center pt-1.5 flex items-center justify-center gap-2">
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> مباشر الآن
+          </span>
+          <LiveCountdown clock={match.clock} />
+        </p>
+      )}
+      {dateTimeLabel && (
+        <p className="text-[11px] text-white/35 text-center pt-1.5">🕐 {dateTimeLabel}</p>
+      )}
+      <button
+        onClick={() => hasDetails && setOpen(!open)}
+        className={`w-full flex items-center justify-between text-sm px-3 py-2 ${hasDetails ? "cursor-pointer hover:bg-white/5" : "cursor-default"}`}
+      >
+        <span className="truncate">{teamA?.name}</span>
+        <span className="flex items-center gap-2 px-3">
+          <span className="font-display text-lg text-gold2">
+            {match.played ? `${match.scoreA} - ${match.scoreB}` : "vs"}
+          </span>
+          {hasDetails && <span className="text-white/30 text-xs">{open ? "▲" : "▼"}</span>}
+        </span>
+        <span className="truncate text-left">{teamB?.name}</span>
+      </button>
+      {open && hasDetails && (
+        <div className="border-t border-white/10 bg-black/20 px-4 py-3 space-y-3">
+          {timeline.length > 0 && (
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] text-gold2/70">🎙️ تعليق حي على أحداث المباراة</p>
+              <button
+                onClick={() => speakAll(timeline)}
+                className="text-[11px] px-2 py-1 rounded border border-gold/30 text-gold2 hover:bg-gold/10"
+              >
+                ▶️ تشغيل كل التعليق
+              </button>
+            </div>
+          )}
+          <div className="space-y-2">
+            {timeline.map((e) => (
+              <div key={e.id} className={`flex items-start gap-2 text-xs ${e.side === "B" ? "flex-row-reverse text-right" : ""}`}>
+                <button
+                  onClick={() => speak(generateCommentaryLine(e), e.type)}
+                  className="shrink-0 mt-0.5 text-gold2/60 hover:text-gold2"
+                  title="استمع للتعليق"
+                >
+                  🔊
+                </button>
+                <p className="text-white/70 leading-relaxed">{generateCommentaryLine(e)}</p>
+              </div>
+            ))}
           </div>
-          
-          <div className="flex items-center gap-3 bg-slate-900/80 backdrop-blur-md px-4 py-2 rounded-xl border border-indigo-500/30">
-            <Shield className="w-4 h-4 text-indigo-400" />
-            <span className="text-xs text-slate-300">وضع القراءة والتفاعل للجمهور</span>
-          </div>
+          {match.notes && (
+            <p className="text-[11px] text-white/40 pt-1 border-t border-white/5 mt-2">📋 {match.notes}</p>
+          )}
         </div>
-      </header>
+      )}
+    </div>
+  );
+}
 
-      {/* المحتوى الرئيسي */}
-      <main className="max-w-7xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* القسم الأيمن: النتائج والتعليقات */}
-        <section className="lg:col-span-2 space-y-8">
-          
-          {/* شاشة المباراة الأخيرة */}
-          <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950/60 rounded-3xl p-6 border border-amber-500/30 shadow-2xl relative overflow-hidden">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
-              <span className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-2">
-                <Zap className="w-4 h-4 fill-amber-400" /> أبرز مباراة
-              </span>
-              <span className="px-3 py-1 bg-emerald-500/20 text-emerald-400 text-xs font-semibold rounded-full border border-emerald-500/30">
-                انتهت
-              </span>
-            </div>
+/* ---------------- تبويب خروج المغلوب: شجرة بطولة بأسلوب دوري الأبطال ---------------- */
+function BracketTab({ teams, matches }) {
+  const teamById = Object.fromEntries(teams.map((t) => [t.id, t]));
+  const knockoutMatches = matches.filter((m) => m.stage === "knockout");
+  const rounds = [...new Set(knockoutMatches.map((m) => m.round))];
 
-            {/* Scoreboard */}
-            <div className="grid grid-cols-3 items-center text-center py-6 bg-slate-950/60 rounded-2xl border border-slate-800">
-              <div className="space-y-2">
-                <div className="w-14 h-14 mx-auto bg-gradient-to-tr from-blue-600 to-indigo-500 rounded-full flex items-center justify-center text-lg font-bold shadow-lg">
-                  {featuredMatch.teamA[0]}
-                </div>
-                <h3 className="font-bold text-sm md:text-base text-slate-100">{featuredMatch.teamA}</h3>
+  if (rounds.length === 0) return <p className="text-white/40 text-center py-10">لم تُقم أي قرعة إقصائية بعد.</p>;
+
+  return (
+    <div className="flex items-center gap-3 overflow-x-auto pb-6 px-1">
+      {rounds.map((roundLabel, ri) => {
+        const isFinal = ri === rounds.length - 1 || roundLabel === "النهائي";
+        const theme = getRoundTheme(roundLabel, isFinal);
+        const roundMatches = knockoutMatches.filter((m) => m.round === roundLabel);
+        return (
+          <div key={roundLabel} className="flex items-center gap-3">
+            <div className="min-w-[240px]">
+              <div className="text-center mb-4">
+                <h2 className={`font-display text-2xl ${theme.title}`}>
+                  {theme.icon} {roundLabel}
+                </h2>
+                <div className="h-0.5 w-16 mx-auto mt-1 rounded-full" style={{ background: theme.underline }} />
               </div>
-
-              <div className="space-y-1">
-                <div className="text-3xl md:text-5xl font-black tracking-widest text-amber-400 font-mono">
-                  {featuredMatch.scoreA} - {featuredMatch.scoreB}
-                </div>
-                <span className="text-[10px] text-slate-400">النتيجة النهائية</span>
-              </div>
-
-              <div className="space-y-2">
-                <div className="w-14 h-14 mx-auto bg-gradient-to-tr from-red-600 to-rose-500 rounded-full flex items-center justify-center text-lg font-bold shadow-lg">
-                  {featuredMatch.teamB[0]}
-                </div>
-                <h3 className="font-bold text-sm md:text-base text-slate-100">{featuredMatch.teamB}</h3>
-              </div>
-            </div>
-
-            {/* تصويت رجل المباراة */}
-            <div className="mt-6 pt-4 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-4">
-              <span className="text-xs font-medium text-slate-300 flex items-center gap-2">
-                <Star className="w-4 h-4 text-amber-400 fill-amber-400" /> تصويت الأفضل في المباراة:
-              </span>
-              <div className="flex gap-2">
-                {['صانع الألعاب', 'المهاجم', 'الحارس'].map((player, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => setUserVote(player)}
-                    className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${
-                      userVote === player
-                        ? 'bg-amber-400 text-slate-950 shadow-md scale-105'
-                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    }`}
-                  >
-                    {player}
-                  </button>
+              <div className="space-y-8">
+                {roundMatches.map((m) => (
+                  <div key={m.id} className={`rounded-xl p-4 ${theme.card}`}>
+                    {m.clock?.running && (
+                      <p className="text-[11px] text-red-400 text-center mb-2 flex items-center justify-center gap-2">
+                        <span className="flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> مباشر
+                        </span>
+                        <LiveCountdown clock={m.clock} />
+                      </p>
+                    )}
+                    {formatMatchDateTime(m) && (
+                      <p className="text-[11px] text-white/35 text-center mb-2">🕐 {formatMatchDateTime(m)}</p>
+                    )}
+                    <MatchLine name={teamById[m.teamA]?.name} score={m.scoreA} isWinner={m.winner === m.teamA} played={m.played} />
+                    <div className="h-px bg-white/10 my-2" />
+                    <MatchLine name={teamById[m.teamB]?.name} score={m.scoreB} isWinner={m.winner === m.teamB} played={m.played} />
+                    <BracketMatchScorers match={m} teamA={teamById[m.teamA]} teamB={teamById[m.teamB]} />
+                  </div>
                 ))}
               </div>
             </div>
+            {!isFinal && (
+              <div className="hidden sm:flex flex-col items-center text-gold/40 shrink-0">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                  <path d="M4 12h14M12 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+            )}
           </div>
+        );
+      })}
+    </div>
+  );
+}
 
-          {/* التعليقات ورفـع الفيديو/الصور */}
-          <div className="bg-slate-900/90 rounded-3xl p-6 border border-slate-800 space-y-6">
-            <h2 className="text-lg font-bold flex items-center gap-2 text-indigo-300">
-              <MessageSquare className="w-5 h-5 text-amber-400" /> التعليقات ولقطات ضربات الجزاء
-            </h2>
+/* يمنح كل دور إقصائي هوية بصرية مميزة (برونزي/فضي/ذهبي) تطابق نفس ألوان لوحة التحكم */
+function getRoundTheme(roundLabel, isFinal) {
+  if (isFinal || roundLabel === "النهائي") {
+    return {
+      icon: "🥇",
+      title: "text-gold2",
+      underline: "linear-gradient(90deg, transparent, #d4af37, transparent)",
+      card: "border-2 border-gold shadow-[0_0_25px_rgba(212,175,55,0.35)] bg-gradient-to-b from-[#1a1530] to-[#0b0d20]",
+    };
+  }
+  if (roundLabel === "نصف النهائي") {
+    return {
+      icon: "🥈",
+      title: "text-slate-200",
+      underline: "linear-gradient(90deg, transparent, #cbd5e1, transparent)",
+      card: "border border-slate-300/30 bg-gradient-to-b from-[#1a2030] to-[#0b0d1a]",
+    };
+  }
+  if (roundLabel === "ربع النهائي") {
+    return {
+      icon: "🥉",
+      title: "text-orange-300",
+      underline: "linear-gradient(90deg, transparent, #c2703d, transparent)",
+      card: "border border-orange-700/25 glass-card",
+    };
+  }
+  return { icon: "", title: "text-white/80", underline: "linear-gradient(90deg, transparent, #d4af37, transparent)", card: "glass-card" };
+}
 
-            <form onSubmit={handleAddComment} className="space-y-4 bg-slate-950/50 p-4 rounded-2xl border border-slate-800">
-              <textarea
-                value={newComment}
-                onChange={(e) => setNewComment(e.target.value)}
-                placeholder="اكتب تعليقك أو أرفق فيديو/صورة لضربة الجزاء..."
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs focus:outline-none focus:border-indigo-500 text-slate-200 resize-none h-20"
-              />
+function MatchLine({ name, score, isWinner, played }) {
+  return (
+    <div className={`flex items-center justify-between text-sm ${isWinner ? "text-gold2 font-bold" : "text-white/70"}`}>
+      <span className="truncate flex items-center gap-1.5">
+        {isWinner && <span className="text-xs">★</span>}
+        {name || "—"}
+      </span>
+      <span className="font-display text-lg">{played ? score : "-"}</span>
+    </div>
+  );
+}
 
-              {mediaPreview && (
-                <div className="relative w-28 h-28 rounded-xl overflow-hidden border border-amber-400/50">
-                  {mediaFile?.type.startsWith('video') ? (
-                    <video src={mediaPreview} className="w-full h-full object-cover" />
-                  ) : (
-                    <img src={mediaPreview} alt="Preview" className="w-full h-full object-cover" />
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => { setMediaFile(null); setMediaPreview(null); }}
-                    className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px]"
-                  >
-                    ✕
-                  </button>
-                </div>
-              )}
+function BracketMatchScorers({ match, teamA, teamB }) {
+  const timeline = matchEventsTimeline(match, teamA, teamB).filter((e) => e.type === "goal");
+  if (timeline.length === 0) return null;
+  return (
+    <div className="mt-2 pt-2 border-t border-white/10 space-y-0.5">
+      {timeline.map((e) => (
+        <p key={e.id} className={`text-[11px] text-white/40 flex items-center gap-1 ${e.side === "B" ? "flex-row-reverse text-left" : ""}`}>
+          <button onClick={() => speak(generateCommentaryLine(e), e.type)} className="text-gold2/50 hover:text-gold2" title="استمع للتعليق">🔊</button>
+          ⚽ {e.playerName} {e.minute ? `${e.minute}'` : ""}
+        </p>
+      ))}
+    </div>
+  );
+}
 
-              <div className="flex items-center justify-between pt-2">
-                <label className="cursor-pointer flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition">
-                  <Upload className="w-4 h-4 text-amber-400" />
-                  <span>ارفاق لقطة/فيديو</span>
-                  <input
-                    type="file"
-                    accept="image/*,video/*"
-                    onChange={handleMediaUpload}
-                    className="hidden"
-                  />
-                </label>
+/* ---------------- تبويب الهدافون والجوائز (عرض عام) ---------------- */
+function AwardsView({ teams, matches, settings }) {
+  const scorers = computeTopScorers(teams, matches);
+  const awards = settings?.awards || {};
+  const hasAwards = awards.bestPlayer || awards.bestGoalkeeper || awards.bestYoungPlayer;
 
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg transition"
+  return (
+    <div className="space-y-6">
+      <section className="glass-card rounded-2xl p-6">
+        <h2 className="font-display text-2xl text-gold2 mb-4">🏆 هداف الدوري</h2>
+        {scorers.length === 0 ? (
+          <p className="text-white/40 text-sm">لا توجد أهداف مسجّلة بعد.</p>
+        ) : (
+          <div className="space-y-2">
+            {scorers.slice(0, 10).map((s, i) => {
+              const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : null;
+              return (
+                <div
+                  key={`${s.playerId || s.name}-${s.teamId}`}
+                  className={`flex items-center gap-3 rounded-lg px-4 py-2.5 ${
+                    i === 0 ? "border border-gold/50 bg-gold/5" : "border border-white/5"
+                  }`}
                 >
-                  نشر
-                </button>
-              </div>
-            </form>
-
-            {/* قائمة التعليقات */}
-            <div className="space-y-4 max-h-96 overflow-y-auto pr-1">
-              {comments.length === 0 ? (
-                <p className="text-center text-xs text-slate-500 py-6">لا توجد تعليقات بعد. كن أول من يشارك بلقطة أو رأي!</p>
-              ) : (
-                comments.map((item) => (
-                  <div key={item.id} className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-3">
-                    <div className="flex justify-between items-center text-xs text-slate-400">
-                      <span className="font-bold text-amber-300">مشجع رياضى</span>
-                      <span>{item.time}</span>
-                    </div>
-                    {item.text && <p className="text-xs text-slate-200 leading-relaxed">{item.text}</p>}
-                    {item.media && (
-                      <div className="mt-2 rounded-xl overflow-hidden max-w-md border border-slate-800">
-                        {item.mediaType === 'video' ? (
-                          <video src={item.media} controls className="w-full max-h-60 object-cover" />
-                        ) : (
-                          <img src={item.media} alt="Penalty Shot" className="w-full max-h-60 object-cover" />
-                        )}
-                      </div>
-                    )}
-                    <div className="flex items-center justify-end pt-1">
-                      <button
-                        onClick={() => handleLike(item.id)}
-                        className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-amber-400 transition"
-                      >
-                        <ThumbsUp className="w-3.5 h-3.5" />
-                        <span>{item.likes}</span>
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+                  <span className={`w-7 text-center ${medal ? "text-lg" : "font-display text-lg text-white/40"}`}>
+                    {medal || i + 1}
+                  </span>
+                  <span className="flex-1 font-semibold">{s.name}</span>
+                  <span className="text-white/50 text-sm">{s.teamName}</span>
+                  <span className="font-display text-xl text-gold2 w-10 text-center">{s.goals}</span>
+                </div>
+              );
+            })}
           </div>
+        )}
+      </section>
+
+      {hasAwards && (
+        <section className="grid sm:grid-cols-3 gap-4">
+          {awards.bestPlayer && <AwardCard icon="🥇" label="أفضل لاعب" name={awards.bestPlayer} />}
+          {awards.bestGoalkeeper && <AwardCard icon="🧤" label="أفضل حارس مرمى" name={awards.bestGoalkeeper} />}
+          {awards.bestYoungPlayer && <AwardCard icon="⭐" label="أفضل لاعب شاب" name={awards.bestYoungPlayer} />}
         </section>
+      )}
+    </div>
+  );
+}
 
-        {/* القسم الأيسر: الترتيب والهداف */}
-        <aside className="space-y-8">
-          
-          {/* جدول الترتيب */}
-          <div className="bg-slate-900/90 rounded-3xl p-6 border border-slate-800 space-y-4">
-            <h2 className="text-md font-bold flex items-center gap-2 text-amber-400">
-              <Medal className="w-5 h-5" /> جدول الترتيب العام
-            </h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-right text-xs">
-                <thead>
-                  <tr className="border-b border-slate-800 text-slate-400">
-                    <th className="py-2">#</th>
-                    <th className="py-2">الفريق</th>
-                    <th className="py-2 text-center">لعب</th>
-                    <th className="py-2 text-center">النقاط</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/50">
-                  {teams.map((team, index) => (
-                    <tr key={index} className="hover:bg-slate-800/30">
-                      <td className="py-3 font-bold text-amber-400">{index + 1}</td>
-                      <td className="py-3 font-semibold">{team.name}</td>
-                      <td className="py-3 text-center text-slate-400">{team.played}</td>
-                      <td className="py-3 text-center font-bold text-emerald-400">{team.points}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+function AwardCard({ icon, label, name }) {
+  return (
+    <div className="glass-card rounded-2xl p-6 text-center">
+      <div className="text-4xl mb-2">{icon}</div>
+      <p className="text-white/50 text-xs mb-1">{label}</p>
+      <p className="font-display text-xl text-gold2">{name}</p>
+    </div>
+  );
+}
 
-          {/* هداف البطولة */}
-          <div className="bg-gradient-to-br from-indigo-950/40 to-slate-900 rounded-3xl p-6 border border-indigo-500/20 space-y-4">
-            <h3 className="text-md font-bold flex items-center gap-2 text-indigo-300">
-              <Flame className="w-5 h-5 text-orange-400" /> هداف البطولة
-            </h3>
-            <div className="flex items-center gap-4 bg-slate-950/60 p-4 rounded-2xl border border-slate-800">
-              <div className="w-12 h-12 bg-amber-400 text-slate-950 rounded-xl flex items-center justify-center font-black text-xl">
-                ⚽
-              </div>
-              <div>
-                <p className="font-bold text-slate-100 text-sm">{topScorer.name}</p>
-                <p className="text-xs text-slate-400">{topScorer.goals} أهداف ({topScorer.team})</p>
-              </div>
-            </div>
-          </div>
+/* ---------------- كتاب الأرقام القياسية (يجمع كل المواسم المؤرشفة + الحالي) ---------------- */
+function RecordsBookView({ data }) {
+  const records = computeRecordsBook(data);
+  const hasAny =
+    records.topScorerAllTime || records.biggestWin || records.longestStreak || records.mostTitles || records.firstChampion;
 
-        </aside>
+  return (
+    <div>
+      <p className="text-center text-white/40 text-xs mb-6">
+        📚 مجموعة من {records.seasonsCount} موسم{records.seasonsCount > 1 ? "ًا" : ""} (شاملة الموسم الحالي)
+      </p>
+      {!hasAny ? (
+        <p className="text-white/40 text-center py-10">لا توجد أرقام قياسية كافية بعد — الأرقام تظهر تدريجيًا كلما لُعبت مباريات أكثر.</p>
+      ) : (
+        <div className="grid sm:grid-cols-2 gap-4">
+          {records.topScorerAllTime && (
+            <RecordCard icon="⚽" title="أكثر هداف في تاريخ الدوري">
+              <span className="font-display text-2xl text-gold2">{records.topScorerAllTime.name}</span>
+              <span className="text-white/50 text-sm"> — {records.topScorerAllTime.goals} هدف</span>
+            </RecordCard>
+          )}
+          {records.biggestWin && (
+            <RecordCard icon="🔥" title="أكبر فوز في تاريخ الدوري">
+              <span className="font-display text-2xl text-gold2">{records.biggestWin.winnerName}</span>
+              <span className="text-white/50 text-sm"> {records.biggestWin.score} على {records.biggestWin.loserName}</span>
+              <p className="text-white/30 text-xs mt-1">{records.biggestWin.season}</p>
+            </RecordCard>
+          )}
+          {records.longestStreak && (
+            <RecordCard icon="📈" title="أطول سلسلة انتصارات متتالية">
+              <span className="font-display text-2xl text-gold2">{records.longestStreak.teamName}</span>
+              <span className="text-white/50 text-sm"> — {records.longestStreak.count} فوزًا متتاليًا</span>
+              <p className="text-white/30 text-xs mt-1">{records.longestStreak.season}</p>
+            </RecordCard>
+          )}
+          {records.mostTitles && (
+            <RecordCard icon="👑" title="الفريق الأكثر تتويجًا">
+              <span className="font-display text-2xl text-gold2">{records.mostTitles.name}</span>
+              <span className="text-white/50 text-sm"> — {records.mostTitles.count} لقب</span>
+            </RecordCard>
+          )}
+          {records.firstChampion && (
+            <RecordCard icon="🏛️" title="أول بطل في تاريخ الدوري">
+              <span className="font-display text-2xl text-gold2">{records.firstChampion.name}</span>
+              <p className="text-white/30 text-xs mt-1">{records.firstChampion.season}</p>
+            </RecordCard>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
-      </main>
+function RecordCard({ icon, title, children }) {
+  return (
+    <div className="glass-card rounded-2xl p-6">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-2xl">{icon}</span>
+        <h3 className="text-white/60 text-sm">{title}</h3>
+      </div>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+/* ---------------- جداول مشتركة ---------------- */
+function MiniTable({ table }) {
+  return (
+    <table className="w-full text-sm">
+      <thead>
+        <tr className="text-white/40 text-xs">
+          <th className="text-right font-normal pb-2">الفريق</th>
+          <th className="pb-2 w-8">ل</th>
+          <th className="pb-2 w-8">نق</th>
+        </tr>
+      </thead>
+      <tbody>
+        {table.slice(0, 4).map((t, i) => (
+          <tr key={t.id} className={i < 2 ? "text-white" : "text-white/60"}>
+            <td className="py-1.5 flex items-center gap-2">
+              <span className="w-4 text-gold2/70 text-xs">{i + 1}</span>
+              {t.name}
+            </td>
+            <td className="text-center">{t.played}</td>
+            <td className="text-center font-display text-lg text-gold2">{t.points}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+export function FullTable({ teams }) {
+  return (
+    <table className="w-full text-sm">
+      <thead>
+        <tr className="text-white/40 text-xs">
+          <th className="text-right font-normal pb-2">#</th>
+          <th className="text-right font-normal pb-2">الفريق</th>
+          <th className="pb-2">لعب</th>
+          <th className="pb-2">فوز</th>
+          <th className="pb-2">تعادل</th>
+          <th className="pb-2">خسارة</th>
+          <th className="pb-2">له</th>
+          <th className="pb-2">عليه</th>
+          <th className="pb-2">فارق</th>
+          <th className="pb-2">نقاط</th>
+        </tr>
+      </thead>
+      <tbody>
+        {teams.map((t, i) => (
+          <tr key={t.id} className="border-t border-white/5">
+            <td className="py-2 text-white/40">{i + 1}</td>
+            <td className="py-2 font-semibold">{t.name}</td>
+            <td className="text-center">{t.played}</td>
+            <td className="text-center">{t.won}</td>
+            <td className="text-center">{t.drawn}</td>
+            <td className="text-center">{t.lost}</td>
+            <td className="text-center">{t.gf}</td>
+            <td className="text-center">{t.ga}</td>
+            <td className="text-center">{t.gf - t.ga}</td>
+            <td className="text-center font-display text-lg text-gold2">{t.points}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="glass-card rounded-2xl p-10 text-center">
+      <p className="text-white/60 mb-3">لم تُضف أي فرق بعد.</p>
+      <Link href="/admin" className="inline-block px-5 py-2 rounded-lg bg-gold/90 text-black font-semibold hover:bg-gold2 transition">
+        اذهب للوحة التحكم لإضافة الفرق
+      </Link>
     </div>
   );
 }
