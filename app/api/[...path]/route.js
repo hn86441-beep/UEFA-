@@ -58,18 +58,10 @@ async function handleGET(req, { params }) {
   const seg = p.join("/");
 
   if (seg === "data") {
-    // حمولة خفيفة فقط — لا تشمل الأرشيف ولا المقاطع الصوتية (ثقيلة الحجم)
-    // حتى يبقى التحديث المتكرر السريع (أثناء المباريات المباشرة) خفيفًا وسريعًا
     const data = await getData();
-    const { archives, ...lean } = data;
-    return ok(lean);
-  }
-  if (seg === "archives") {
-    const data = await getData();
-    return ok({ archives: data.archives || [] });
-  }
-  if (seg === "soundclips") {
-    return ok({ soundClips: await getSoundClips() });
+    if (!data.archives) data.archives = [];
+    data.settings = { ...data.settings, soundClips: await getSoundClips() };
+    return ok(data);
   }
   if (seg === "auth/check") {
     const authed = await isAuthedFromCookieHeader(req.headers.get("cookie") || "");
@@ -109,7 +101,7 @@ async function handlePOST(req, { params }) {
   // يصل كنص Base64 عادي ضمن JSON، ويُحفظ مباشرة في نفس قاعدة البيانات
   // المستخدَمة لبيانات الدوري — بدون أي خدمة تخزين ملفات منفصلة.
   if (seg === "sounds/save") {
-    const SOUND_TYPES = ["goal", "save", "yellow", "red", "penalty"];
+    const SOUND_TYPES = ["goal", "save", "yellow", "red"];
     try {
       const { type, dataUrl } = await readBody(req);
       if (!SOUND_TYPES.includes(type)) return fail("نوع الحدث غير معروف");
