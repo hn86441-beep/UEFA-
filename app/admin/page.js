@@ -129,7 +129,7 @@ function Dashboard({ onLoggedOut }) {
       </>
     );
   }
-  if (error || !data) {
+  if (!data) {
     return (
       <>
         <Nav />
@@ -202,7 +202,6 @@ function SettingsTab({ data, refresh, flash }) {
   const [leagueName, setLeagueName] = useState(data.settings?.leagueName || "");
   const [season, setSeason] = useState(data.settings?.season || "");
   const [championTeamId, setChampionTeamId] = useState(data.settings?.championTeamId || "");
-  const [soundEnabled, setSoundEnabled] = useState(data.settings?.soundEnabled !== false);
 
   async function save() {
     try {
@@ -219,16 +218,6 @@ function SettingsTab({ data, refresh, flash }) {
       await callApi("/api/data", "PUT", { championTeamId: championTeamId || null });
       await refresh();
       flash(championTeamId ? "🏆 تم تتويج الفريق البطل! ستظهر صفحة الاحتفال للزوار" : "تم إلغاء تتويج البطل");
-    } catch (e) {
-      flash(e.message, true);
-    }
-  }
-
-  async function toggleSound(val) {
-    setSoundEnabled(val);
-    try {
-      await callApi("/api/data", "PUT", { soundEnabled: val });
-      await refresh();
     } catch (e) {
       flash(e.message, true);
     }
@@ -269,15 +258,6 @@ function SettingsTab({ data, refresh, flash }) {
         </div>
       </div>
 
-      <div className="glass-card rounded-2xl p-6 max-w-lg">
-        <h2 className="font-display text-2xl text-gold2 mb-2">🔊 الأصوات</h2>
-        <p className="text-white/50 text-sm mb-4">صافرة ترحيبية خفيفة تُسمع مرة واحدة عند أول زيارة للموقع في كل جلسة تصفح.</p>
-        <label className="flex items-center gap-2 text-sm text-white/70">
-          <input type="checkbox" checked={soundEnabled} onChange={(e) => toggleSound(e.target.checked)} />
-          تفعيل صافرة الترحيب للزوار
-        </label>
-      </div>
-
       <SoundClipsManager data={data} refresh={refresh} flash={flash} />
     </div>
   );
@@ -289,6 +269,7 @@ const SOUND_EVENT_TYPES = [
   { id: "save", label: "🧤 تصدي حارس", color: "blue" },
   { id: "yellow", label: "🟨 إنذار", color: "yellow" },
   { id: "red", label: "🟥 طرد", color: "red" },
+  { id: "fulltime", label: "⏰ نهاية الوقت", color: "gold" },
 ];
 
 function SoundClipsManager({ data, refresh, flash }) {
@@ -328,7 +309,7 @@ function SoundClipsManager({ data, refresh, flash }) {
     try {
       await callApi(`/api/sounds/${type}`, "DELETE");
       await refresh();
-      flash("تم حذف المقطع — سيعود الصوت الاصطناعي التلقائي لهذا الحدث");
+      flash("تم حذف المقطع");
     } catch (e) {
       flash(e.message, true);
     }
@@ -344,7 +325,7 @@ function SoundClipsManager({ data, refresh, flash }) {
       <h2 className="font-display text-2xl text-gold2 mb-2">🎙️ مقاطع صوتية مخصّصة لأحداث المباراة</h2>
       <p className="text-white/50 text-sm mb-5">
         ارفع مقطعك الصوتي الخاص لكل نوع حدث — بمجرد تسجيل هدف أو تصدٍّ أو بطاقة في أي مباراة مباشرة،
-        سيُشغَّل مقطعك تلقائيًا للزوار بدل الصوت الاصطناعي الافتراضي.
+        سيُشغَّل مقطعك تلقائيًا للزوار. وبدون مقطع لا يُسمع أي صوت.
       </p>
       <div className="grid sm:grid-cols-2 gap-4">
         {SOUND_EVENT_TYPES.map((t) => {
@@ -363,7 +344,7 @@ function SoundClipsManager({ data, refresh, flash }) {
                   <span className="text-[11px] text-white/30">مرفوع ✓</span>
                 </div>
               ) : (
-                <p className="text-[11px] text-white/30 mb-2">لا يوجد مقطع مخصّص — يُستخدم الصوت الاصطناعي حاليًا.</p>
+                <p className="text-[11px] text-white/30 mb-2">لا يوجد مقطع مخصّص — لن يُسمع صوت لهذا الحدث.</p>
               )}
               <label className="block">
                 <span className="text-[11px] text-gold2/80 cursor-pointer hover:text-gold2">
