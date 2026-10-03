@@ -619,11 +619,11 @@ function MatchesTab({ data, refresh, flash, celebrate }) {
 
   // طلب واحد فقط يحفظ الأهداف والملاحظات وأفضل لاعب والتشكيلة معًا
   // (بدل 4 طلبات منفصلة كانت تتسابق وتمحو تعديلات بعضها البعض)
-  async function saveDetails(matchId, patch) {
+  async function saveDetails(matchId, patch, msg) {
     try {
       await callApi(`/api/matches/${matchId}`, "PUT", patch);
       await refresh();
-      flash("تم حفظ تفاصيل المباراة");
+      flash(msg || "تم حفظ تفاصيل المباراة");
     } catch (e) {
       flash(e.message, true);
     }
@@ -792,6 +792,10 @@ function ManualMatchForm({ teams, onAdd }) {
 function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveDateTime, onSaveDetails, onSaveClock }) {
   const [a, setA] = useState(match.scoreA ?? "");
   const [b, setB] = useState(match.scoreB ?? "");
+  useEffect(() => {
+    setA(match.scoreA ?? "");
+    setB(match.scoreB ?? "");
+  }, [match.scoreA, match.scoreB]);
   return (
     <div className="rounded-lg border border-white/10 px-3 py-2 text-sm">
       <div className="flex items-center gap-3">
@@ -979,19 +983,55 @@ function MatchDetailsPanel({ match, teamA, teamB, onSaveDetails }) {
   const playersA = teamA?.players || [];
   const playersB = teamB?.players || [];
 
-  function addEvent(side, type) {
-    const players = side === "A" ? playersA : playersB;
-    const base = { id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, side, type, playerId: players[0]?.id || "", minute: "" };
-    if (type === "red") base.suspensionMinutes = 5;
-    setEvents([...events, base]);
+  // ضغطة واحدة = حدث فوري محفوظ وظاهر للزوار (الدقيقة تؤخذ من ساعة المباراة)
+  const scoreRef = useRef({ A: match.scoreA ?? 0, B: match.scoreB ?? 0 });
+  useEffect(() => {
+    scoreRef.current = { A: match.scoreA ?? 0, B: match.scoreB ?? 0 };
+  }, [match.scoreA, match.scoreB]);
+
+  function quickAdd(side, type, playerId) {
+    const minute = Math.max(1, Math.ceil(elapsedMinutes));
+    const mk = (t, extra = {}) => ({
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      side, type: t, playerId, minute, ...extra,
+    });
+    const added = [mk(type, type === "red" ? { suspensionMinutes: 5 } : {})];
+    let msg = { goal: "⚽ هدف!", save: "🧤 تصدٍّ", yellow: "🟨 إنذار", red: "🟥 طرد" }[type] || "تمت الإضافة";
+    // إنذار ثانٍ لنفس اللاعب = طرد تلقائي
+    const hadYellow = events.some((e) => e.type === "yellow" && e.side === side && e.playerId === playerId);
+    const hadRed = events.some((e) => e.type === "red" && e.side === side && e.playerId === playerId);
+    if (type === "yellow" && playerId && hadYellow && !hadRed) {
+      added.push(mk("red", { suspensionMinutes: 5 }));
+      msg = "🟨🟨 إنذار ثانٍ ← 🟥 طرد تلقائي";
+    }
+    const next = [...events, ...added];
+    setEvents(next);
+    const patch = { events: next };
+    if (type === "goal") {
+      scoreRef.current[side] += 1;
+      patch.scoreA = scoreRef.current.A;
+      patch.scoreB = scoreRef.current.B;
+      patch.played = true;
+      msg += ` النتيجة ${patch.scoreA} - ${patch.scoreB}`;
+    }
+    onSaveDetails(match.id, patch, msg);
   }
+
   function updateEvent(idx, patch) {
     const list = [...events];
     list[idx] = { ...list[idx], ...patch };
     setEvents(list);
   }
   function removeEvent(idx) {
-    setEvents(events.filter((_, i) => i !== idx));
+    const ev = events[idx];
+    const next = events.filter((_, k) => k !== idx);
+    setEvents(next);
+    if (ev?.type === "goal") {
+      scoreRef.current[ev.side] = Math.max(0, scoreRef.current[ev.side] - 1);
+      onSaveDetails(match.id, { events: next, scoreA: scoreRef.current.A, scoreB: scoreRef.current.B }, "تم حذف الهدف وتعديل النتيجة");
+    } else {
+      onSaveDetails(match.id, { events: next }, "تم حذف الحدث");
+    }
   }
   function toggleLineup(side, group, playerId) {
     const current = lineups[side][group];
@@ -1024,8 +1064,8 @@ function MatchDetailsPanel({ match, teamA, teamB, onSaveDetails }) {
   return (
     <div className="mt-2 bg-black/20 rounded-lg p-3 space-y-3">
       <div className="grid sm:grid-cols-2 gap-3">
-        <EventSide label={teamA?.name} side="A" players={playersA} events={sorted} allEvents={events} onAdd={addEvent} onChange={updateEvent} onRemove={removeEvent} elapsedMinutes={elapsedMinutes} />
-        <EventSide label={teamB?.name} side="B" players={playersB} events={sorted} allEvents={events} onAdd={addEvent} onChange={updateEvent} onRemove={removeEvent} elapsedMinutes={elapsedMinutes} />
+        <EventSide label={teamA?.name} side="A" players={playersA} events={sorted} allEvents={events} onAdd={quickAdd} onChange={updateEvent} onRemove={removeEvent} elapsedMinutes={elapsedMinutes} />
+        <EventSide label={teamB?.name} side="B" players={playersB} events={sorted} allEvents={events} onAdd={quickAdd} onChange={updateEvent} onRemove={removeEvent} elapsedMinutes={elapsedMinutes} />
       </div>
 
       {allPlayersForMotm.length > 0 && (
@@ -1066,7 +1106,12 @@ function MatchDetailsPanel({ match, teamA, teamB, onSaveDetails }) {
           className="w-full rounded-lg bg-black/30 border border-white/10 px-3 py-2 text-xs outline-none focus:border-gold/50 resize-none"
         />
       </div>
-      <div className="flex justify-end gap-2">
+      <div className="flex justify-end gap-2 flex-wrap">
+        {events.length > 0 && (
+          <button onClick={() => removeEvent(events.length - 1)} className="text-xs px-3 py-1.5 rounded border border-amber-500/40 text-amber-300 hover:bg-amber-500/10">
+            ↩ تراجع عن آخر حدث
+          </button>
+        )}
         <button onClick={() => setOpen(false)} className="text-xs px-3 py-1.5 rounded border border-white/15 text-white/60 hover:bg-white/5">إغلاق</button>
         <button onClick={() => { saveAll(); setOpen(false); }} className="text-xs px-3 py-1.5 rounded bg-gold/90 text-black font-semibold hover:bg-gold2">حفظ التفاصيل</button>
       </div>
@@ -1115,6 +1160,8 @@ function LineupSide({ label, players, lineup, onToggle }) {
 }
 
 function EventSide({ label, side, players, allEvents, onAdd, onChange, onRemove, elapsedMinutes = 0 }) {
+  const [pid, setPid] = useState(players[0]?.id || "");
+  const curPid = players.some((p) => p.id === pid) ? pid : players[0]?.id || "";
   const rows = allEvents
     .map((e, i) => ({ e, i }))
     .filter(({ e }) => e.side === side);
@@ -1164,11 +1211,17 @@ function EventSide({ label, side, players, allEvents, onAdd, onChange, onRemove,
           </div>
         ))}
       </div>
-      <div className="flex gap-1.5 text-[11px] flex-wrap">
-        <button onClick={() => onAdd(side, "goal")} className="text-gold2/70 hover:text-gold2">+ ⚽ هدف</button>
-        <button onClick={() => onAdd(side, "save")} className="text-blue-300/70 hover:text-blue-300">+ 🧤 تصدي</button>
-        <button onClick={() => onAdd(side, "yellow")} className="text-yellow-300/70 hover:text-yellow-300">+ 🟨 إنذار</button>
-        <button onClick={() => onAdd(side, "red")} className="text-red-400/70 hover:text-red-400">+ 🟥 طرد</button>
+      <div className="mt-2 rounded-lg border border-gold/20 bg-gold/5 p-2">
+        <p className="text-[10px] text-white/40 mb-1">⚡ حدث فوري — اختر اللاعب ثم اضغط (يُحفظ ويظهر للزوار فورًا)</p>
+        <select value={curPid} onChange={(ev) => setPid(ev.target.value)} className="w-full mb-1.5 bg-black/30 border border-white/10 rounded px-1.5 py-1.5 text-xs outline-none focus:border-gold/50">
+          {players.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <div className="grid grid-cols-4 gap-1 text-[11px]">
+          <button onClick={() => onAdd(side, "goal", curPid)} className="py-1.5 rounded bg-gold/20 text-gold2 border border-gold/40 hover:bg-gold/30">⚽ هدف</button>
+          <button onClick={() => onAdd(side, "save", curPid)} className="py-1.5 rounded bg-blue-400/15 text-blue-300 border border-blue-400/30 hover:bg-blue-400/25">🧤 تصدي</button>
+          <button onClick={() => onAdd(side, "yellow", curPid)} className="py-1.5 rounded bg-yellow-300/15 text-yellow-300 border border-yellow-300/30 hover:bg-yellow-300/25">🟨 إنذار</button>
+          <button onClick={() => onAdd(side, "red", curPid)} className="py-1.5 rounded bg-red-500/15 text-red-300 border border-red-500/30 hover:bg-red-500/25">🟥 طرد</button>
+        </div>
       </div>
     </div>
   );
@@ -1256,11 +1309,11 @@ function KnockoutTab({ data, refresh, flash, celebrate }) {
 
   // طلب واحد فقط يحفظ الأهداف والملاحظات وأفضل لاعب والتشكيلة معًا
   // (بدل 4 طلبات منفصلة كانت تتسابق وتمحو تعديلات بعضها البعض)
-  async function saveDetails(matchId, patch) {
+  async function saveDetails(matchId, patch, msg) {
     try {
       await callApi(`/api/matches/${matchId}`, "PUT", patch);
       await refresh();
-      flash("تم حفظ تفاصيل المباراة");
+      flash(msg || "تم حفظ تفاصيل المباراة");
     } catch (e) {
       flash(e.message, true);
     }
@@ -1462,6 +1515,9 @@ function ManualKnockoutForm({ teams, onAdd }) {
 function ScoreInput({ match, side, onSave }) {
   const field = side === "A" ? "scoreA" : "scoreB";
   const [val, setVal] = useState(match[field] ?? "");
+  useEffect(() => {
+    setVal(match[field] ?? "");
+  }, [match[field]]);
   return (
     <input
       type="number"
