@@ -88,14 +88,32 @@ async function handleGET(req, { params }) {
       deploymentUrl: process.env.VERCEL_URL || "غير معروف",
     });
   }
-  // بثّ مقطع صوتي واحد كملف صوت (للمعاينة في لوحة التحكم)
+  // بثّ مقطع صوتي كملف حقيقي مع دعم Range (ضروري لتشغيل الصوت على آيفون/سفاري)
   if (p[0] === "sounds" && p.length === 2) {
     const clips = await getSoundClips();
-    const m = (clips[p[1]] || "").match(/^data:([^;]+);base64,(.*)$/);
+    const m = (clips[p[1]] || "").match(/^data:([^;,]+)(?:;[^,]*)?;base64,(.*)$/);
     if (!m) return fail("غير موجود", 404);
-    return new Response(Buffer.from(m[2], "base64"), {
-      headers: { "Content-Type": m[1], "Cache-Control": "no-store" },
-    });
+    const buf = Buffer.from(m[2], "base64");
+    const total = buf.length;
+    const versioned = !!new URL(req.url).searchParams.get("v");
+    const headers = {
+      "Content-Type": m[1],
+      "Accept-Ranges": "bytes",
+      "Cache-Control": versioned ? "public, max-age=31536000, immutable" : "no-store",
+    };
+    const r = (req.headers.get("range") || "").match(/bytes=(\d*)-(\d*)/);
+    if (r) {
+      const start = r[1] === "" ? Math.max(0, total - Number(r[2])) : Number(r[1]);
+      const end = r[1] !== "" && r[2] !== "" ? Math.min(Number(r[2]), total - 1) : total - 1;
+      if (!(start >= 0 && start <= end)) {
+        return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${total}` } });
+      }
+      return new Response(buf.subarray(start, end + 1), {
+        status: 206,
+        headers: { ...headers, "Content-Range": `bytes ${start}-${end}/${total}`, "Content-Length": String(end - start + 1) },
+      });
+    }
+    return new Response(buf, { headers: { ...headers, "Content-Length": String(total) } });
   }
   return fail("غير موجود", 404);
 }
@@ -371,6 +389,10 @@ async function handlePUT(req, { params }) {
     ["scoreA", "scoreB", "played", "date", "time", "round", "winner", "events", "notes", "venue", "motm", "lineups", "clock"].forEach((k) => {
       if (k in body) m[k] = body[k];
     });
+    // عند تعادل النتيجة (مثلًا بعد إلغاء هدف) نُلغي الفائز القديم ما لم يُحدَّد يدويًا
+    if (("scoreA" in body || "scoreB" in body) && !("winner" in body) && m.scoreA !== null && m.scoreA === m.scoreB) {
+      m.winner = null;
+    }
     if (m.stage === "knockout" && m.played && m.scoreA !== null && m.scoreB !== null) {
       if (m.scoreA > m.scoreB) m.winner = m.teamA;
       else if (m.scoreB > m.scoreA) m.winner = m.teamB;
