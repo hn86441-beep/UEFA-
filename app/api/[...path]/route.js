@@ -8,6 +8,7 @@ import {
   makeSessionCookie,
   clearSessionCookie,
   isAuthedFromCookieHeader,
+  withLock,
 } from "../../../lib/server";
 import {
   uid,
@@ -29,6 +30,9 @@ function ok(body, init) {
 function fail(message, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
+
+// كل طلب كتابة يُنفَّذ بالتتابع، فلا يمحو طلبٌ تعديلَ طلب آخر (سبب ضياع الأحداث)
+const serialize = (fn) => withLock("league-write", fn);
 
 async function readBody(req) {
   return req.json().catch(() => ({}));
@@ -60,7 +64,12 @@ async function handleGET(req, { params }) {
   if (seg === "data") {
     const data = await getData();
     if (!data.archives) data.archives = [];
-    data.settings = { ...data.settings, soundClips: await getSoundClips() };
+    // نُرسل روابط خفيفة بدل ملفات الصوت الكاملة (كانت تثقل كل تحديث)
+    const clips = await getSoundClips();
+    data.settings = {
+      ...data.settings,
+      soundClips: Object.fromEntries(Object.keys(clips).map((k) => [k, `/api/sounds/${k}`])),
+    };
     return ok(data);
   }
   if (seg === "auth/check") {
@@ -79,13 +88,22 @@ async function handleGET(req, { params }) {
       deploymentUrl: process.env.VERCEL_URL || "غير معروف",
     });
   }
+  // بثّ مقطع صوتي واحد كملف صوت (للمعاينة في لوحة التحكم)
+  if (p[0] === "sounds" && p.length === 2) {
+    const clips = await getSoundClips();
+    const m = (clips[p[1]] || "").match(/^data:([^;]+);base64,(.*)$/);
+    if (!m) return fail("غير موجود", 404);
+    return new Response(Buffer.from(m[2], "base64"), {
+      headers: { "Content-Type": m[1], "Cache-Control": "no-store" },
+    });
+  }
   return fail("غير موجود", 404);
 }
 
 /* =========================== POST =========================== */
 export async function POST(req, ctx) {
   try {
-    return await handlePOST(req, ctx);
+    return await serialize(() => handlePOST(req, ctx));
   } catch (e) {
     return fail(e.message || "حدث خطأ غير متوقع في الخادم", 500);
   }
@@ -101,7 +119,7 @@ async function handlePOST(req, { params }) {
   // يصل كنص Base64 عادي ضمن JSON، ويُحفظ مباشرة في نفس قاعدة البيانات
   // المستخدَمة لبيانات الدوري — بدون أي خدمة تخزين ملفات منفصلة.
   if (seg === "sounds/save") {
-    const SOUND_TYPES = ["goal", "save", "yellow", "red"];
+    const SOUND_TYPES = ["goal", "save", "yellow", "red", "fulltime"];
     try {
       const { type, dataUrl } = await readBody(req);
       if (!SOUND_TYPES.includes(type)) return fail("نوع الحدث غير معروف");
@@ -311,7 +329,7 @@ async function handlePOST(req, { params }) {
 /* =========================== PUT =========================== */
 export async function PUT(req, ctx) {
   try {
-    return await handlePUT(req, ctx);
+    return await serialize(() => handlePUT(req, ctx));
   } catch (e) {
     return fail(e.message || "حدث خطأ غير متوقع في الخادم", 500);
   }
@@ -378,7 +396,7 @@ async function handlePUT(req, { params }) {
 /* =========================== DELETE =========================== */
 export async function DELETE(req, ctx) {
   try {
-    return await handleDELETE(req, ctx);
+    return await serialize(() => handleDELETE(req, ctx));
   } catch (e) {
     return fail(e.message || "حدث خطأ غير متوقع في الخادم", 500);
   }
