@@ -32,7 +32,7 @@ function HomeInner() {
   const [tab, setTab] = useState(searchParams.get("tab") || "standings");
   const [confettiTick, setConfettiTick] = useState(0);
   const [soundOn, setSoundOn] = useState(true);
-  const { flash, needsUnlock, unlock, hasClips } = useEventSounds(data, soundOn);
+  const { flash, needsUnlock, unlock, hasClips, test, status } = useEventSounds(data, soundOn);
   const hasLive = !!data?.matches?.some((m) => m.clock?.running);
 
   // تحديث كل 3 ثوانٍ أثناء مباراة مباشرة فقط، وإلا كل 15 ثانية (ويتوقف تمامًا والتبويب مخفي)
@@ -88,7 +88,7 @@ function HomeInner() {
               {hasLiveMatch && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />}
               📺 {hasLiveMatch ? "المباراة المباشرة الآن" : "صفحة المباريات المباشرة"}
             </Link>
-            <SoundToggle on={soundOn} setOn={setSoundOn} needsUnlock={needsUnlock} unlock={unlock} hasClips={hasClips} />
+            <SoundToggle on={soundOn} setOn={setSoundOn} needsUnlock={needsUnlock} unlock={unlock} hasClips={hasClips} test={test} status={status} />
           </div>
 
           {todaysMatches.length > 0 && (
