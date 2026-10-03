@@ -31,11 +31,10 @@ html, body {
   width: 60vw;
   height: 60vw;
   border-radius: 50%;
-  filter: blur(90px);
-  opacity: 0.16;
+  opacity: 0.2;
 }
-.fl1 { top: -20vw; left: -10vw; background: #d4af37; }
-.fl2 { top: 10vw; right: -20vw; background: #6f2bd6; }
+.fl1 { top: -20vw; left: -10vw; background: radial-gradient(circle, #d4af37 0%, transparent 65%); }
+.fl2 { top: 10vw; right: -20vw; background: radial-gradient(circle, #6f2bd6 0%, transparent 65%); }
 
 .pitch-lines {
   position: absolute;
@@ -55,9 +54,8 @@ html, body {
 
 .glass-card {
   position: relative;
-  background: linear-gradient(180deg, rgba(20,28,64,0.55), rgba(9,13,30,0.55));
+  background: linear-gradient(180deg, rgba(20,28,64,0.82), rgba(9,13,30,0.85));
   border: 1px solid rgba(212,175,55,0.18);
-  backdrop-filter: blur(6px);
   overflow: hidden;
 }
 
