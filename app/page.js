@@ -1,10 +1,12 @@
 "use client";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, memo, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Nav from "../components/Nav";
 import Confetti from "../components/Confetti";
 import { useLeagueData } from "../lib/useLeagueData";
-import { computeStandings, computeTopScorers, matchEventsTimeline, detectLeagueStage, computeRecordsBook, generateCommentaryLine } from "../lib/logic";
+import { useEventSounds } from "../lib/useEventSounds";
+import { LiveFlash, SoundToggle, eventText } from "../components/LiveBits";
+import { computeStandings, computeTopScorers, matchEventsTimeline, detectLeagueStage, computeRecordsBook } from "../lib/logic";
 import Link from "next/link";
 
 const TABS = [
@@ -24,112 +26,19 @@ export default function HomePage() {
 }
 
 function HomeInner() {
-  // نبدأ بتحديث معتدل، ثم نُسرعه تلقائيًا إلى كل 4 ثوانٍ فقط أثناء وجود مباراة مباشرة
-  // (لتظهر النتيجة والتعليق بسرعة أكبر وقت الحاجة الفعلية)، ونُبطئه إلى كل 20 ثانية
-  // في باقي الأوقات لتخفيف الحمل عن الموقع.
-  const [pollMs, setPollMs] = useState(10000);
-  const { data, loading, error } = useLeagueData({ poll: pollMs });
+  const [pollMs, setPollMs] = useState(15000);
+  const { data, loading, error } = useLeagueData({ poll: pollMs, url: "/api/live" });
   const searchParams = useSearchParams();
-  const initialTab = searchParams.get("tab") || "standings";
-  const [tab, setTab] = useState(initialTab);
+  const [tab, setTab] = useState(searchParams.get("tab") || "standings");
   const [confettiTick, setConfettiTick] = useState(0);
-  const [narrationOn, setNarrationOn] = useState(true);
-  const [flashEvent, setFlashEvent] = useState(null);
-  const flashTickRef = useRef(0);
-  const whistlePlayed = useRef(false);
-  const spokenEventIds = useRef(new Set());
-  const previouslyLiveRef = useRef(new Set());
-  const narrationInitialized = useRef(false);
+  const [soundOn, setSoundOn] = useState(true);
+  const { flash, needsUnlock, unlock, hasClips } = useEventSounds(data, soundOn);
+  const hasLive = !!data?.matches?.some((m) => m.clock?.running);
 
+  // تحديث كل 3 ثوانٍ أثناء مباراة مباشرة فقط، وإلا كل 15 ثانية (ويتوقف تمامًا والتبويب مخفي)
   useEffect(() => {
-    if (!data?.matches) return;
-    const hasLive = data.matches.some((m) => m.clock?.running);
-    setPollMs(hasLive ? 2500 : 15000);
-  }, [data?.matches]);
-
-  // صافرة ترحيب خفيفة تُسمع مرة واحدة فقط لكل جلسة تصفح (يمكن تعطيلها من الإعدادات)
-  useEffect(() => {
-    if (!data?.settings) return;
-    if (data.settings.soundEnabled === false) return;
-    if (whistlePlayed.current) return;
-    if (typeof window === "undefined") return;
-    if (sessionStorage.getItem("cl_whistle_played")) return;
-    whistlePlayed.current = true;
-    sessionStorage.setItem("cl_whistle_played", "1");
-    try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      const ctx = new AudioCtx();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(2200, ctx.currentTime);
-      osc.frequency.linearRampToValueAtTime(3100, ctx.currentTime + 0.12);
-      osc.frequency.linearRampToValueAtTime(2400, ctx.currentTime + 0.3);
-      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-      gain.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 0.03);
-      gain.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.36);
-    } catch {
-      /* تجاهل: بعض المتصفحات تمنع الصوت التلقائي، لا مشكلة */
-    }
-  }, [data?.settings]);
-
-  // تعليق صوتي تلقائي حي: كل حدث جديد يُسجَّل في مباراة "مباشرة" يُنطق فور ظهوره
-  // بدون أي ضغط زر من الزائر — يبدأ فقط بعد أول تحديث لتجنّب سرد كل تاريخ المباراة دفعة واحدة
-  useEffect(() => {
-    if (!data?.matches || !narrationOn) return;
-    const teamById = Object.fromEntries((data.teams || []).map((t) => [t.id, t]));
-    const liveMatches = data.matches.filter((m) => m.clock?.running);
-
-    if (!narrationInitialized.current) {
-      // أول مرة فقط: سجّل كل الأحداث الحالية كـ"مسموعة" دون نطقها، حتى لا نسرد كل شيء دفعة واحدة
-      liveMatches.forEach((m) => {
-        matchEventsTimeline(m, teamById[m.teamA], teamById[m.teamB]).forEach((e) => spokenEventIds.current.add(e.id));
-        previouslyLiveRef.current.add(m.id);
-      });
-      narrationInitialized.current = true;
-      return;
-    }
-
-    liveMatches.forEach((m) => {
-      previouslyLiveRef.current.add(m.id);
-      const timeline = matchEventsTimeline(m, teamById[m.teamA], teamById[m.teamB]);
-      timeline.forEach((e) => {
-        if (spokenEventIds.current.has(e.id)) return;
-        spokenEventIds.current.add(e.id);
-
-        // مقطع صوتي مخصّص رفعه المشرف لهذا النوع من الأحداث إن وُجد، وإلا صوت اصطناعي تلقائي
-        const clipUrl = data.settings?.soundClips?.[e.type];
-        if (clipUrl) {
-          const audio = new Audio(clipUrl);
-          audio.play().catch(() => queueSpeak(generateCommentaryLine(e), e.type));
-        } else {
-          queueSpeak(generateCommentaryLine(e), e.type);
-        }
-
-        // ومضة لحظية على كامل الشاشة تجعل الموقع يشعر بالحيوية عند وقوع أي حدث حي
-        flashTickRef.current += 1;
-        setFlashEvent({ tick: flashTickRef.current, type: e.type });
-      });
-    });
-
-    // اكتشاف "نهاية الوقت" — مباراة كانت مباشرة وتوقفت الآن ووصل عدّادها للصفر تلقائيًا
-    const stillLiveIds = new Set(liveMatches.map((m) => m.id));
-    [...previouslyLiveRef.current].forEach((id) => {
-      if (stillLiveIds.has(id)) return; // ما زالت مباشرة، لا شيء يُفعل
-      previouslyLiveRef.current.delete(id);
-      const m = data.matches.find((mm) => mm.id === id);
-      const wasNaturalEnd = m && (m.clock?.remainingSeconds ?? 0) <= 0;
-      if (wasNaturalEnd) {
-        playFullTimeWhistle();
-        flashTickRef.current += 1;
-        setFlashEvent({ tick: flashTickRef.current, type: "fulltime" });
-      }
-    });
-  }, [data?.matches, data?.teams, data?.settings?.soundClips, narrationOn]);
+    setPollMs(hasLive ? 3000 : 15000);
+  }, [hasLive]);
 
   // كونفيتي خفيف عند أول فتح لتبويب الهدافون والجوائز في هذه الجلسة
   function handleTabChange(id) {
@@ -155,7 +64,7 @@ function HomeInner() {
   return (
     <Shell settings={settings}>
       <Confetti trigger={confettiTick} />
-      <LiveFlash event={flashEvent} />
+      <LiveFlash event={flash} />
       <div className={`stage-glow stage-${stage}`} />
 
       {championTeam && <CoronationBanner team={championTeam} settings={settings} />}
@@ -169,22 +78,18 @@ function HomeInner() {
         <EmptyState />
       ) : (
         <>
-          {hasLiveMatch && (
-            <div className="flex justify-center mb-4">
-              <button
-                onClick={() => {
-                  setNarrationOn((v) => !v);
-                  if (narrationOn && typeof window !== "undefined") window.speechSynthesis?.cancel();
-                }}
-                className={`text-xs px-4 py-2 rounded-full border flex items-center gap-2 transition ${
-                  narrationOn ? "border-gold/50 text-gold2 bg-gold/10" : "border-white/15 text-white/40"
-                }`}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${narrationOn ? "bg-red-500 animate-pulse" : "bg-white/30"}`} />
-                🎙️ التعليق الصوتي المباشر {narrationOn ? "مفعّل" : "معطّل"}
-              </button>
-            </div>
-          )}
+          <div className="flex justify-center items-center gap-2 mb-4 flex-wrap">
+            <Link
+              href="/live"
+              className={`text-xs px-4 py-2 rounded-full border flex items-center gap-2 transition ${
+                hasLiveMatch ? "border-red-500/50 text-red-300 bg-red-500/10" : "border-gold/30 text-gold2 hover:bg-gold/10"
+              }`}
+            >
+              {hasLiveMatch && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />}
+              📺 {hasLiveMatch ? "المباراة المباشرة الآن" : "صفحة المباريات المباشرة"}
+            </Link>
+            <SoundToggle on={soundOn} setOn={setSoundOn} needsUnlock={needsUnlock} unlock={unlock} hasClips={hasClips} />
+          </div>
 
           {todaysMatches.length > 0 && (
             <TodaysMatchesBanner matches={todaysMatches} teamById={teamById} />
@@ -284,23 +189,6 @@ function CoronationBanner({ team, settings }) {
   );
 }
 
-/* ==================== شريط مباريات اليوم ==================== */
-/* ومضة لحظية على كامل الشاشة عند وقوع أي حدث حي — تجعل الموقع يشعر بالحيوية */
-function LiveFlash({ event }) {
-  if (!event) return null;
-  const colorClass =
-    event.type === "goal"
-      ? "bg-gold/20"
-      : event.type === "red"
-      ? "bg-red-500/20"
-      : event.type === "save"
-      ? "bg-sky-400/15"
-      : event.type === "fulltime"
-      ? "bg-white/25"
-      : "bg-yellow-300/15";
-  return <div key={event.tick} className={`fixed inset-0 pointer-events-none z-40 flash-pulse ${colorClass}`} />;
-}
-
 function TodaysMatchesBanner({ matches, teamById }) {
   return (
     <section className="glass-card rounded-2xl p-4 mb-6">
@@ -328,7 +216,7 @@ function Shell({ children, settings }) {
 }
 
 /* ==================== الهيرو: ملعب + أضواء كاشفة + شعار أصلي ==================== */
-function StadiumHero({ settings }) {
+const StadiumHero = memo(function StadiumHero({ settings }) {
   return (
     <section className="relative pt-10 pb-6 text-center overflow-hidden">
       <div className="relative mx-auto max-w-2xl h-56 sm:h-72 mb-2">
@@ -407,7 +295,7 @@ function StadiumHero({ settings }) {
       <p className="text-white/40 text-sm">ليلة الأبطال تبدأ هنا</p>
     </section>
   );
-}
+}, (a, b) => a.settings?.leagueName === b.settings?.leagueName && a.settings?.season === b.settings?.season);
 
 /* ---------------- تبويب الترتيب ---------------- */
 function StandingsTab({ teams, groups, matches }) {
@@ -495,91 +383,6 @@ function formatMatchDateTime(match) {
   return match.date || match.time;
 }
 
-// ينظّف النص المكتوب (المزخرف بصريًا بشرطات وعلامات تعجب متكررة) قبل نطقه
-// حتى يخرج الصوت واضحًا بدل أن يقرأ الرموز الزخرفية حرفيًا
-function cleanForSpeech(text) {
-  return text
-    .replace(/[ـ]+/g, "") // إزالة حرف المدّ (التطويل) الزخرفي
-    .replace(/!{2,}/g, "!") // تبسيط علامات التعجب المتكررة
-    .replace(/[⚽🧤🟨🟥🎙️🔊▶️]/gu, ""); // إزالة الرموز التعبيرية من النص المنطوق
-}
-
-// يختار أفضل صوت عربي متاح في المتصفح إن وُجد (صوت اصطناعي عام، وليس محاكاة لأي شخص)
-function pickArabicVoice() {
-  if (typeof window === "undefined" || !window.speechSynthesis) return null;
-  const voices = window.speechSynthesis.getVoices();
-  return voices.find((v) => v.lang?.toLowerCase().startsWith("ar")) || null;
-}
-
-// إعدادات نطق أكثر حماسًا حسب نوع الحدث (أسرع وأعلى نبرة للأهداف، أهدأ للبطاقات)
-function excitementSettings(type) {
-  if (type === "goal") return { rate: 1.15, pitch: 1.25 };
-  if (type === "save") return { rate: 1.1, pitch: 1.15 };
-  if (type === "red") return { rate: 1.08, pitch: 0.9 };
-  return { rate: 1.0, pitch: 1.0 };
-}
-
-function buildUtterance(text, type) {
-  const utter = new SpeechSynthesisUtterance(cleanForSpeech(text));
-  utter.lang = "ar-SA";
-  const { rate, pitch } = excitementSettings(type);
-  utter.rate = rate;
-  utter.pitch = pitch;
-  const voice = pickArabicVoice();
-  if (voice) utter.voice = voice;
-  return utter;
-}
-
-// نطق فوري (يقاطع أي نطق سابق) — يُستخدم عند ضغط الزائر على زر 🔊 يدويًا
-function speak(text, type) {
-  if (typeof window === "undefined" || !window.speechSynthesis) return;
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(buildUtterance(text, type));
-}
-
-// نطق كل أحداث المباراة بالترتيب، حدثًا تلو الآخر (يقاطع أي نطق سابق)
-function speakAll(timeline) {
-  if (typeof window === "undefined" || !window.speechSynthesis) return;
-  window.speechSynthesis.cancel();
-  timeline.forEach((e) => {
-    window.speechSynthesis.speak(buildUtterance(generateCommentaryLine(e), e.type));
-  });
-}
-
-// نطق تلقائي حي بدون مقاطعة ما يُقال حاليًا — يُستخدم للتعليق التلقائي على المباريات المباشرة
-function queueSpeak(text, type) {
-  if (typeof window === "undefined" || !window.speechSynthesis) return;
-  window.speechSynthesis.speak(buildUtterance(text, type));
-}
-
-// صافرة "نهاية الوقت" — نغمتان قصيرتان متتاليتان (صوت اصطناعي مُركَّب، وليس مسجَّلًا من أي شخص)
-// لتمييزها عن صافرة الترحيب الفردية عند فتح الموقع لأول مرة
-function playFullTimeWhistle() {
-  if (typeof window === "undefined") return;
-  try {
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    const ctx = new AudioCtx();
-    [0, 0.42].forEach((delay) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      const t0 = ctx.currentTime + delay;
-      osc.frequency.setValueAtTime(2200, t0);
-      osc.frequency.linearRampToValueAtTime(3100, t0 + 0.12);
-      osc.frequency.linearRampToValueAtTime(2400, t0 + 0.3);
-      gain.gain.setValueAtTime(0.0001, t0);
-      gain.gain.linearRampToValueAtTime(0.09, t0 + 0.03);
-      gain.gain.linearRampToValueAtTime(0.0001, t0 + 0.35);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(t0);
-      osc.stop(t0 + 0.36);
-    });
-  } catch {
-    /* تجاهل: بعض المتصفحات تمنع الصوت التلقائي، لا مشكلة */
-  }
-}
-
 function MatchCard({ match, teamA, teamB }) {
   const [open, setOpen] = useState(false);
   const timeline = matchEventsTimeline(match, teamA, teamB);
@@ -595,6 +398,7 @@ function MatchCard({ match, teamA, teamB }) {
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> مباشر الآن
           </span>
           <LiveCountdown clock={match.clock} />
+          <Link href={`/live?match=${match.id}`} className="underline text-gold2/80">تابع</Link>
         </p>
       )}
       {dateTimeLabel && (
@@ -615,28 +419,11 @@ function MatchCard({ match, teamA, teamB }) {
       </button>
       {open && hasDetails && (
         <div className="border-t border-white/10 bg-black/20 px-4 py-3 space-y-3">
-          {timeline.length > 0 && (
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] text-gold2/70">🎙️ تعليق حي على أحداث المباراة</p>
-              <button
-                onClick={() => speakAll(timeline)}
-                className="text-[11px] px-2 py-1 rounded border border-gold/30 text-gold2 hover:bg-gold/10"
-              >
-                ▶️ تشغيل كل التعليق
-              </button>
-            </div>
-          )}
           <div className="space-y-2">
             {timeline.map((e) => (
-              <div key={e.id} className={`flex items-start gap-2 text-xs ${e.side === "B" ? "flex-row-reverse text-right" : ""}`}>
-                <button
-                  onClick={() => speak(generateCommentaryLine(e), e.type)}
-                  className="shrink-0 mt-0.5 text-gold2/60 hover:text-gold2"
-                  title="استمع للتعليق"
-                >
-                  🔊
-                </button>
-                <p className="text-white/70 leading-relaxed">{generateCommentaryLine(e)}</p>
+              <div key={e.id} className={`flex items-center gap-2 text-xs ${e.side === "B" ? "flex-row-reverse text-right" : ""}`}>
+                <span className="shrink-0 w-8 text-gold2/70 tabular-nums">{e.minute ? `${e.minute}'` : ""}</span>
+                <p className="text-white/70 leading-relaxed">{eventText(e)}</p>
               </div>
             ))}
           </div>
@@ -756,7 +543,6 @@ function BracketMatchScorers({ match, teamA, teamB }) {
     <div className="mt-2 pt-2 border-t border-white/10 space-y-0.5">
       {timeline.map((e) => (
         <p key={e.id} className={`text-[11px] text-white/40 flex items-center gap-1 ${e.side === "B" ? "flex-row-reverse text-left" : ""}`}>
-          <button onClick={() => speak(generateCommentaryLine(e), e.type)} className="text-gold2/50 hover:text-gold2" title="استمع للتعليق">🔊</button>
           ⚽ {e.playerName} {e.minute ? `${e.minute}'` : ""}
         </p>
       ))}
