@@ -20,10 +20,13 @@ export default function Nav({ leagueName = "دوري الأبطال" }) {
           </svg>
           <span className="font-brand text-2xl tracking-wide gold-text">{leagueName}</span>
         </Link>
-        <nav className="flex items-center gap-1 sm:gap-3 text-sm">
+        <nav className="flex items-center gap-1 sm:gap-3 text-xs sm:text-sm overflow-x-auto whitespace-nowrap min-w-0">
           <Link href="/?tab=standings" className="px-2 sm:px-3 py-2 rounded-lg hover:bg-white/5 transition">الترتيب</Link>
           <Link href="/?tab=groups" className="px-2 sm:px-3 py-2 rounded-lg hover:bg-white/5 transition">المجموعات</Link>
           <Link href="/?tab=bracket" className="px-2 sm:px-3 py-2 rounded-lg hover:bg-white/5 transition">خروج المغلوب</Link>
+          <Link href="/live" className="px-2 sm:px-3 py-2 rounded-lg hover:bg-white/5 transition">📺 المباشر</Link>
+          <Link href="/stars" className="px-2 sm:px-3 py-2 rounded-lg hover:bg-white/5 transition">🃏 النجوم</Link>
+          <Link href="/calculator" className="px-2 sm:px-3 py-2 rounded-lg hover:bg-white/5 transition">🧮 التأهل</Link>
           <Link
             href="/admin"
             className="px-3 py-2 rounded-lg border border-gold/40 text-gold2 hover:bg-gold/10 transition font-semibold"
