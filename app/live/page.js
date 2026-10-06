@@ -187,6 +187,11 @@ function LiveInner() {
                         <div className={`rounded-lg border border-white/10 bg-black/20 px-2 py-1.5 text-xs sm:text-sm break-words ${m.color}`}>
                           {m.icon} {e.playerName || m.label}
                           <span className="block text-[10px] text-white/40">{m.label}</span>
+                          {e.assistId && (
+                            <span className="block text-[10px] text-sky-300/80">
+                              🅰️ {(e.side === "B" ? teamB : teamA)?.players?.find((pl) => pl.id === e.assistId)?.name}
+                            </span>
+                          )}
                         </div>
                       );
                       return (
