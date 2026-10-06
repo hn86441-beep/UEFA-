@@ -9,6 +9,7 @@ import {
   clearSessionCookie,
   isAuthedFromCookieHeader,
   withLock,
+  getPublicSounds,
 } from "../../../lib/server";
 import {
   uid,
@@ -71,6 +72,22 @@ async function handleGET(req, { params }) {
       soundClips: Object.fromEntries(Object.keys(clips).map((k) => [k, `/api/sounds/${k}`])),
     };
     return ok(data);
+  }
+  // نسخة خفيفة للزوار (بلا ملفات صوت) + قائمة أنواع المقاطع لتشغيلها كملفات
+  if (seg === "lite") {
+    const data = await getData();
+    if (!data.archives) data.archives = [];
+    let version = "";
+    let types = [];
+    try {
+      const pub = await getPublicSounds();
+      version = pub.version;
+      types = Object.keys(pub.clips || {});
+    } catch {}
+    return ok(
+      { ...data, settings: { ...data.settings, soundClips: undefined }, soundsVersion: version, soundTypes: types },
+      { headers: { "Cache-Control": "public, s-maxage=2, stale-while-revalidate=5" } }
+    );
   }
   if (seg === "auth/check") {
     const authed = await isAuthedFromCookieHeader(req.headers.get("cookie") || "");
