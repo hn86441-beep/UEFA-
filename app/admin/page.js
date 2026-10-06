@@ -142,9 +142,9 @@ function Dashboard({ onLoggedOut }) {
     <>
       <Confetti trigger={celebrateTick} />
       <Nav leagueName={data.settings?.leagueName} />
-      <main className="max-w-6xl mx-auto px-4 pb-24">
-        <div className="flex items-center justify-between pt-8 pb-6">
-          <h1 className="font-display text-4xl gold-text">لوحة التحكم</h1>
+      <main className="max-w-6xl mx-auto px-2.5 sm:px-4 pb-24">
+        <div className="flex items-center justify-between pt-4 sm:pt-8 pb-3 sm:pb-6">
+          <h1 className="font-display text-2xl sm:text-4xl gold-text">لوحة التحكم</h1>
           <button onClick={handleLogout} className="text-sm px-4 py-2 rounded-lg border border-white/15 hover:bg-white/5 transition">
             تسجيل الخروج
           </button>
@@ -156,12 +156,12 @@ function Dashboard({ onLoggedOut }) {
           </div>
         )}
 
-        <div className="flex flex-wrap gap-2 mb-6">
+        <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-4 sm:mb-6">
           {TABS.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${tab === t.id ? "bg-gold/90 text-black" : "glass-card text-white/70 hover:text-white"}`}
+              className={`px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-semibold transition ${tab === t.id ? "bg-gold/90 text-black" : "glass-card text-white/70 hover:text-white"}`}
             >
               {t.label}
             </button>
@@ -225,8 +225,8 @@ function SettingsTab({ data, refresh, flash }) {
 
   return (
     <div className="space-y-6">
-      <div className="glass-card rounded-2xl p-6 max-w-lg">
-        <h2 className="font-display text-2xl text-gold2 mb-4">إعدادات الدوري</h2>
+      <div className="glass-card rounded-2xl p-4 sm:p-6 max-w-lg">
+        <h2 className="font-display text-xl sm:text-2xl text-gold2 mb-4">إعدادات الدوري</h2>
         <div className="space-y-4">
           <div>
             <label className="block text-sm text-white/60 mb-1">اسم الدوري</label>
@@ -242,8 +242,8 @@ function SettingsTab({ data, refresh, flash }) {
         </div>
       </div>
 
-      <div className="glass-card rounded-2xl p-6 max-w-lg">
-        <h2 className="font-display text-2xl text-gold2 mb-2">🏆 تتويج بطل الموسم</h2>
+      <div className="glass-card rounded-2xl p-4 sm:p-6 max-w-lg">
+        <h2 className="font-display text-xl sm:text-2xl text-gold2 mb-2">🏆 تتويج بطل الموسم</h2>
         <p className="text-white/50 text-sm mb-4">
           عند تحديد الفريق البطل، تظهر للزوار صفحة احتفالية خاصة أعلى الموقع. ألغِ الاختيار لإخفائها.
         </p>
@@ -321,8 +321,8 @@ function SoundClipsManager({ data, refresh, flash }) {
   }
 
   return (
-    <div className="glass-card rounded-2xl p-6 max-w-2xl">
-      <h2 className="font-display text-2xl text-gold2 mb-2">🎙️ مقاطع صوتية مخصّصة لأحداث المباراة</h2>
+    <div className="glass-card rounded-2xl p-4 sm:p-6 max-w-2xl">
+      <h2 className="font-display text-xl sm:text-2xl text-gold2 mb-2">🎙️ مقاطع صوتية مخصّصة لأحداث المباراة</h2>
       <p className="text-white/50 text-sm mb-5">
         ارفع مقطعك الصوتي الخاص لكل نوع حدث — بمجرد تسجيل هدف أو تصدٍّ أو بطاقة في أي مباراة مباشرة،
         سيُشغَّل مقطعك تلقائيًا للزوار. وبدون مقطع لا يُسمع أي صوت.
@@ -415,8 +415,8 @@ function TeamsTab({ data, refresh, flash }) {
 
   return (
     <div className="space-y-6">
-      <div className="glass-card rounded-2xl p-6">
-        <h2 className="font-display text-2xl text-gold2 mb-4">إضافة فريق جديد</h2>
+      <div className="glass-card rounded-2xl p-4 sm:p-6">
+        <h2 className="font-display text-xl sm:text-2xl text-gold2 mb-4">إضافة فريق جديد</h2>
         <div className="flex flex-wrap gap-3">
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="اسم الفريق" className="flex-1 min-w-[200px] rounded-lg bg-black/30 border border-white/10 px-4 py-2.5 outline-none focus:border-gold/50" />
           <select value={group} onChange={(e) => setGroup(e.target.value)} className="rounded-lg bg-black/30 border border-white/10 px-4 py-2.5 outline-none focus:border-gold/50">
@@ -429,9 +429,9 @@ function TeamsTab({ data, refresh, flash }) {
         </div>
       </div>
 
-      <div className="glass-card rounded-2xl p-6">
+      <div className="glass-card rounded-2xl p-4 sm:p-6">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-          <h2 className="font-display text-2xl text-gold2">كل الفرق ({data.teams.length})</h2>
+          <h2 className="font-display text-xl sm:text-2xl text-gold2">كل الفرق ({data.teams.length})</h2>
           <button onClick={recalc} className="text-xs px-3 py-2 rounded-lg border border-gold/40 text-gold2 hover:bg-gold/10 transition">
             تحديث النقاط تلقائيًا من نتائج المباريات
           </button>
@@ -533,16 +533,16 @@ function GroupsTab({ data, refresh, flash }) {
 
   return (
     <div className="space-y-6">
-      <div className="glass-card rounded-2xl p-6">
-        <h2 className="font-display text-2xl text-gold2 mb-4">إنشاء مجموعة</h2>
+      <div className="glass-card rounded-2xl p-4 sm:p-6">
+        <h2 className="font-display text-xl sm:text-2xl text-gold2 mb-4">إنشاء مجموعة</h2>
         <div className="flex flex-wrap gap-3">
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="مثال: أ  أو  A" className="flex-1 min-w-[160px] rounded-lg bg-black/30 border border-white/10 px-4 py-2.5 outline-none focus:border-gold/50" />
           <button onClick={addGroup} className="px-5 py-2.5 rounded-lg bg-gold/90 text-black font-semibold hover:bg-gold2 transition">إضافة مجموعة</button>
         </div>
       </div>
 
-      <div className="glass-card rounded-2xl p-6">
-        <h2 className="font-display text-2xl text-gold2 mb-4">المجموعات ({data.groups.length})</h2>
+      <div className="glass-card rounded-2xl p-4 sm:p-6">
+        <h2 className="font-display text-xl sm:text-2xl text-gold2 mb-4">المجموعات ({data.groups.length})</h2>
         {data.groups.length === 0 ? (
           <p className="text-white/40 text-sm">لا توجد مجموعات بعد.</p>
         ) : (
@@ -569,8 +569,8 @@ function GroupsTab({ data, refresh, flash }) {
         )}
       </div>
 
-      <div className="glass-card rounded-2xl p-6">
-        <h2 className="font-display text-2xl text-gold2 mb-3">قرعة توزيع المجموعات</h2>
+      <div className="glass-card rounded-2xl p-4 sm:p-6">
+        <h2 className="font-display text-xl sm:text-2xl text-gold2 mb-3">قرعة توزيع المجموعات</h2>
         <p className="text-white/50 text-sm mb-4">توزّع كل الفرق عشوائيًا وبالتساوي على المجموعات الموجودة، وتُولّد جدول مباريات كل مجموعة تلقائيًا.</p>
         <label className="flex items-center gap-2 text-sm text-white/70 mb-4">
           <input type="checkbox" checked={doubleRound} onChange={(e) => setDoubleRound(e.target.checked)} />
@@ -676,9 +676,9 @@ function MatchesTab({ data, refresh, flash, celebrate }) {
         const groupTeams = data.teams.filter((t) => t.group === g.id);
         const table = computeStandings(data.teams, data.matches, g.id);
         return (
-          <div key={g.id} className="glass-card rounded-2xl p-6">
+          <div key={g.id} className="glass-card rounded-2xl p-4 sm:p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="font-display text-2xl text-gold2">المجموعة {g.name}</h2>
+              <h2 className="font-display text-xl sm:text-2xl text-gold2">المجموعة {g.name}</h2>
               <ShareStandingsButton leagueName={data.settings?.leagueName} groupName={g.name} table={table} />
             </div>
             <div className="overflow-x-auto mb-5">
@@ -806,10 +806,10 @@ function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveDateTime, onSav
     onSave(match, String(na), String(nb));
   }
   const isTie = knockout && match.played && match.scoreA != null && match.scoreA === match.scoreB;
-  const scoreCls = "w-20 h-20 sm:w-28 sm:h-28 text-center text-5xl sm:text-7xl font-display text-gold2 bg-black/40 border-2 border-white/15 rounded-2xl outline-none focus:border-gold/60";
-  const stepCls = "w-10 h-10 rounded-full border border-white/20 text-xl text-white/70 hover:bg-white/10 active:scale-95 transition";
+  const scoreCls = "w-14 h-14 sm:w-28 sm:h-28 text-center text-3xl sm:text-7xl font-display text-gold2 bg-black/40 border-2 border-white/15 rounded-2xl outline-none focus:border-gold/60";
+  const stepCls = "w-8 h-8 sm:w-10 sm:h-10 rounded-full border border-white/20 text-lg sm:text-xl text-white/70 hover:bg-white/10 active:scale-95 transition";
   return (
-    <div className={`rounded-3xl border-2 p-4 sm:p-6 mb-5 ${live ? "border-red-500/60 bg-gradient-to-b from-red-950/30 to-transparent shadow-[0_0_35px_rgba(239,68,68,0.18)]" : "border-white/10 bg-black/20"}`}>
+    <div className={`rounded-2xl sm:rounded-3xl border-2 p-2.5 sm:p-6 mb-4 sm:mb-5 ${live ? "border-red-500/60 bg-gradient-to-b from-red-950/30 to-transparent shadow-[0_0_35px_rgba(239,68,68,0.18)]" : "border-white/10 bg-black/20"}`}>
       <div className="flex items-center justify-between mb-4">
         <span className={`text-xs sm:text-sm px-3 py-1 rounded-full font-bold ${live ? "bg-red-500/20 text-red-300 animate-pulse" : match.played ? "bg-green-500/15 text-green-300" : "bg-white/10 text-white/50"}`}>
           {live ? "🔴 مباشر الآن" : match.played ? "✅ انتهت / مسجّلة" : "🕐 لم تبدأ بعد"}
@@ -819,7 +819,7 @@ function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveDateTime, onSav
 
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-6">
         <div className="text-center min-w-0">
-          <p className="font-brand text-xl sm:text-4xl text-white leading-tight break-words">{teamA?.name || "—"}</p>
+          <p className="font-brand text-base sm:text-4xl text-white leading-tight break-words">{teamA?.name || "—"}</p>
           <div className="flex justify-center gap-2 mt-3">
             <button onClick={() => bump("A", -1)} className={stepCls}>−</button>
             <button onClick={() => bump("A", 1)} className={stepCls}>+</button>
@@ -831,7 +831,7 @@ function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveDateTime, onSav
           <input type="number" value={b} onChange={(e) => setB(e.target.value)} onBlur={() => onSave(match, a, b)} className={scoreCls} />
         </div>
         <div className="text-center min-w-0">
-          <p className="font-brand text-xl sm:text-4xl text-white leading-tight break-words">{teamB?.name || "—"}</p>
+          <p className="font-brand text-base sm:text-4xl text-white leading-tight break-words">{teamB?.name || "—"}</p>
           <div className="flex justify-center gap-2 mt-3">
             <button onClick={() => bump("B", -1)} className={stepCls}>−</button>
             <button onClick={() => bump("B", 1)} className={stepCls}>+</button>
@@ -916,13 +916,13 @@ function MatchClockControls({ match, onSaveClock }) {
   }
 
   const notStarted = !clock.running && remainingSeconds === totalSeconds;
-  const big = "px-5 py-3 rounded-xl text-base font-bold border-2 active:scale-95 transition";
+  const big = "px-3 py-2 sm:px-5 sm:py-3 rounded-xl text-sm sm:text-base font-bold border-2 active:scale-95 transition";
 
   return (
-    <div className="my-5 rounded-2xl bg-black/35 border border-white/10 p-4 sm:p-5">
+    <div className="my-3 sm:my-5 rounded-2xl bg-black/35 border border-white/10 p-3 sm:p-5">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <span
-          className={`font-display tabular-nums text-6xl sm:text-7xl leading-none ${
+          className={`font-display tabular-nums text-4xl sm:text-7xl leading-none ${
             isFinished ? "text-red-400" : urgent ? "text-red-300 animate-pulse" : clock.running ? "text-green-400" : "text-gold2"
           }`}
         >
@@ -950,7 +950,7 @@ function MatchClockControls({ match, onSaveClock }) {
             <button
               key={m}
               onClick={() => setDuration(m)}
-              className={`text-sm px-3 py-1.5 rounded-lg border ${totalSeconds === m * 60 ? "bg-gold/90 text-black border-gold font-bold" : "border-white/20 text-white/60 hover:bg-white/5"}`}
+              className={`text-xs sm:text-sm px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg border ${totalSeconds === m * 60 ? "bg-gold/90 text-black border-gold font-bold" : "border-white/20 text-white/60 hover:bg-white/5"}`}
             >
               {m}′
             </button>
@@ -989,7 +989,7 @@ function MatchDateTimeInputs({ match, onSave }) {
         onChange={(e) => setVenue(e.target.value)}
         onBlur={() => onSave(match.id, date, time, venue)}
         placeholder="الملعب"
-        className="bg-black/20 border border-white/10 rounded px-3 py-2 text-sm outline-none focus:border-gold/50 w-36"
+        className="bg-black/20 border border-white/10 rounded px-2 py-1.5 text-xs sm:px-3 sm:py-2 sm:text-sm outline-none focus:border-gold/50 w-28 sm:w-36"
       />
     </div>
   );
@@ -1192,8 +1192,8 @@ function EventSide({ label, side, players, allEvents, onAdd, onChange, onRemove,
   const curPid = players.some((p) => p.id === pid) ? pid : players[0]?.id || "";
   const rows = allEvents.map((e, i) => ({ e, i })).filter(({ e }) => e.side === side);
   const accent = side === "A" ? "border-gold/40" : "border-sky-400/40";
-  const sel = "w-full bg-black/40 border border-white/15 rounded-xl px-3 py-3 text-base outline-none focus:border-gold/60";
-  const btn = "h-14 rounded-xl text-base font-bold border-2 active:scale-95 transition";
+  const sel = "w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 sm:py-3 text-sm sm:text-base outline-none focus:border-gold/60";
+  const btn = "h-11 sm:h-14 rounded-xl text-sm sm:text-base font-bold border-2 active:scale-95 transition";
 
   if (players.length === 0) {
     return (
@@ -1206,7 +1206,7 @@ function EventSide({ label, side, players, allEvents, onAdd, onChange, onRemove,
 
   return (
     <div className={`rounded-2xl border-2 ${accent} bg-black/25 p-3 sm:p-4`}>
-      <p className="font-brand text-xl sm:text-2xl text-white mb-3">{label}</p>
+      <p className="font-brand text-lg sm:text-2xl text-white mb-2 sm:mb-3">{label}</p>
 
       <div className="rounded-xl bg-gold/5 border border-gold/25 p-3 mb-4 space-y-2">
         <p className="text-xs text-gold2/80">⚡ حدث فوري — يُحفظ ويظهر للزوار مباشرة (الدقيقة من ساعة المباراة)</p>
@@ -1397,8 +1397,8 @@ function KnockoutTab({ data, refresh, flash, celebrate }) {
 
   return (
     <div className="space-y-6">
-      <div className="glass-card rounded-2xl p-6">
-        <h2 className="font-display text-2xl text-gold2 mb-3">قرعة دور إقصائي جديد</h2>
+      <div className="glass-card rounded-2xl p-4 sm:p-6">
+        <h2 className="font-display text-xl sm:text-2xl text-gold2 mb-3">قرعة دور إقصائي جديد</h2>
         <p className="text-white/50 text-sm mb-4">اختر الفرق المؤهلة لهذا الدور، ثم اضغط "إجراء القرعة" — سيتم تشكيل المباريات عشوائيًا بشكل زوجي.</p>
         <RoundNamePicker value={roundName} onChange={setRoundName} />
         <div className="flex flex-wrap gap-2 mb-4">
@@ -1413,8 +1413,8 @@ function KnockoutTab({ data, refresh, flash, celebrate }) {
         </button>
       </div>
 
-      <div className="glass-card rounded-2xl p-6">
-        <h2 className="font-display text-2xl text-gold2 mb-3">إضافة مباراة إقصائية يدويًا</h2>
+      <div className="glass-card rounded-2xl p-4 sm:p-6">
+        <h2 className="font-display text-xl sm:text-2xl text-gold2 mb-3">إضافة مباراة إقصائية يدويًا</h2>
         <p className="text-white/50 text-sm mb-4">تحكّم كامل: حدد أي فريقين مباشرة بدل الاعتماد على القرعة العشوائية.</p>
         <ManualKnockoutForm teams={data.teams} onAdd={addManualKnockoutMatch} />
       </div>
@@ -1423,8 +1423,8 @@ function KnockoutTab({ data, refresh, flash, celebrate }) {
         <div className="glass-card rounded-2xl p-8 text-center text-white/50">لا توجد أدوار إقصائية بعد.</div>
       ) : (
         rounds.map((roundLabel) => (
-          <div key={roundLabel} className="glass-card rounded-2xl p-6">
-            <h3 className="font-display text-2xl text-gold2 mb-4">{roundLabel}</h3>
+          <div key={roundLabel} className="glass-card rounded-2xl p-4 sm:p-6">
+            <h3 className="font-display text-xl sm:text-2xl text-gold2 mb-4">{roundLabel}</h3>
             <div className="space-y-2">
               {knockoutMatches.filter((m) => m.round === roundLabel).map((m) => (
                 <MatchRow
@@ -1715,8 +1715,8 @@ function AwardsTab({ data, refresh, flash }) {
 
   return (
     <div className="space-y-6">
-      <div className="glass-card rounded-2xl p-6">
-        <h2 className="font-display text-2xl text-gold2 mb-4">🏆 قائمة الهدافين</h2>
+      <div className="glass-card rounded-2xl p-4 sm:p-6">
+        <h2 className="font-display text-xl sm:text-2xl text-gold2 mb-4">🏆 قائمة الهدافين</h2>
         <p className="text-white/50 text-sm mb-4">
           محسوبة تلقائيًا من الأهداف التي تسجّلها في تبويبي "مباريات المجموعات" و"خروج المغلوب"
           عبر زر "تسجيل الهدافين" أسفل كل مباراة.
@@ -1747,8 +1747,8 @@ function AwardsTab({ data, refresh, flash }) {
         )}
       </div>
 
-      <div className="glass-card rounded-2xl p-6 max-w-lg">
-        <h2 className="font-display text-2xl text-gold2 mb-4">🎖️ الجوائز الفردية</h2>
+      <div className="glass-card rounded-2xl p-4 sm:p-6 max-w-lg">
+        <h2 className="font-display text-xl sm:text-2xl text-gold2 mb-4">🎖️ الجوائز الفردية</h2>
         <p className="text-white/50 text-sm mb-4">
           جوائز تُمنح يدويًا بقرارك (لا تُحسب تلقائيًا) — مثل جوائز نهاية الموسم.
         </p>
@@ -1855,8 +1855,8 @@ function ArchiveTab({ data, refresh, flash }) {
 
   return (
     <div className="space-y-6">
-      <div className="glass-card rounded-2xl p-6">
-        <h2 className="font-display text-2xl text-gold2 mb-2">🗄️ أرشفة الموسم وبدء موسم جديد</h2>
+      <div className="glass-card rounded-2xl p-4 sm:p-6">
+        <h2 className="font-display text-xl sm:text-2xl text-gold2 mb-2">🗄️ أرشفة الموسم وبدء موسم جديد</h2>
         <p className="text-white/50 text-sm mb-4">
           يحفظ هذا كل بيانات الموسم الحالي (الفرق، المجموعات، النتائج) في الأرشيف بشكل دائم
           للرجوع إليها لاحقًا، ثم يمسح كل شيء لتبدأ موسمًا جديدًا من الصفر.
@@ -1874,8 +1874,8 @@ function ArchiveTab({ data, refresh, flash }) {
         </div>
       </div>
 
-      <div className="glass-card rounded-2xl p-6">
-        <h2 className="font-display text-2xl text-gold2 mb-2">🏆 شهادة تكريم البطل</h2>
+      <div className="glass-card rounded-2xl p-4 sm:p-6">
+        <h2 className="font-display text-xl sm:text-2xl text-gold2 mb-2">🏆 شهادة تكريم البطل</h2>
         <p className="text-white/50 text-sm mb-4">
           تُنشئ ملف PDF جاهزًا للتحميل والطباعة باسم الفريق البطل (حدده من تبويب الإعدادات أولًا).
         </p>
@@ -1884,8 +1884,8 @@ function ArchiveTab({ data, refresh, flash }) {
         </button>
       </div>
 
-      <div className="glass-card rounded-2xl p-6">
-        <h2 className="font-display text-2xl text-gold2 mb-3">📍 جدول المواعيد والملاعب</h2>
+      <div className="glass-card rounded-2xl p-4 sm:p-6">
+        <h2 className="font-display text-xl sm:text-2xl text-gold2 mb-3">📍 جدول المواعيد والملاعب</h2>
         {scheduled.length === 0 ? (
           <p className="text-white/40 text-sm">لا توجد مباريات محدَّد لها تاريخ بعد.</p>
         ) : (
@@ -1920,8 +1920,8 @@ function ArchiveTab({ data, refresh, flash }) {
         )}
       </div>
 
-      <div className="glass-card rounded-2xl p-6">
-        <h2 className="font-display text-2xl text-gold2 mb-3">
+      <div className="glass-card rounded-2xl p-4 sm:p-6">
+        <h2 className="font-display text-xl sm:text-2xl text-gold2 mb-3">
           المواسم المؤرشفة ({(data.archives || []).length})
         </h2>
         {(data.archives || []).length === 0 ? (
