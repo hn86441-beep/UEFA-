@@ -134,8 +134,14 @@ function LiveInner() {
               </p>
               <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                 <p className="min-w-0 font-brand text-base sm:text-3xl text-white leading-tight break-words">{teamA?.name || "؟"}</p>
-                <p className="font-display text-4xl sm:text-7xl text-gold2 tabular-nums px-1">
-                  {showScore ? `${match.scoreA ?? 0}-${match.scoreB ?? 0}` : "VS"}
+                <p className="font-display text-4xl sm:text-7xl text-gold2 tabular-nums px-1 flex items-center justify-center gap-1.5">
+                  {showScore ? (
+                    <>
+                      <span>{match.scoreA ?? 0}</span>
+                      <span className="text-white/30 text-3xl sm:text-5xl">:</span>
+                      <span>{match.scoreB ?? 0}</span>
+                    </>
+                  ) : "VS"}
                 </p>
                 <p className="min-w-0 font-brand text-base sm:text-3xl text-white leading-tight break-words">{teamB?.name || "؟"}</p>
               </div>
