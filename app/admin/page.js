@@ -789,33 +789,69 @@ function ManualMatchForm({ teams, onAdd }) {
   );
 }
 
-function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveDateTime, onSaveDetails, onSaveClock }) {
+function MatchRow({ match, teamA, teamB, onSave, onDelete, onSaveDateTime, onSaveDetails, onSaveClock, knockout, onSetWinner }) {
   const [a, setA] = useState(match.scoreA ?? "");
   const [b, setB] = useState(match.scoreB ?? "");
   useEffect(() => {
     setA(match.scoreA ?? "");
     setB(match.scoreB ?? "");
   }, [match.scoreA, match.scoreB]);
+  const live = !!match.clock?.running;
+  const num = (v) => (v === "" ? 0 : Number(v) || 0);
+  function bump(side, d) {
+    const na = side === "A" ? Math.max(0, num(a) + d) : num(a);
+    const nb = side === "B" ? Math.max(0, num(b) + d) : num(b);
+    setA(String(na));
+    setB(String(nb));
+    onSave(match, String(na), String(nb));
+  }
+  const isTie = knockout && match.played && match.scoreA != null && match.scoreA === match.scoreB;
+  const scoreCls = "w-20 h-20 sm:w-28 sm:h-28 text-center text-5xl sm:text-7xl font-display text-gold2 bg-black/40 border-2 border-white/15 rounded-2xl outline-none focus:border-gold/60";
+  const stepCls = "w-10 h-10 rounded-full border border-white/20 text-xl text-white/70 hover:bg-white/10 active:scale-95 transition";
   return (
-    <div className="rounded-lg border border-white/10 px-3 py-2 text-sm">
-      <div className="flex items-center gap-3">
-        <span className="flex-1 truncate">{teamA?.name || "—"}</span>
-        <input type="number" value={a} onChange={(e) => setA(e.target.value)} onBlur={() => onSave(match, a, b)} className="w-14 text-center bg-black/20 border border-white/10 rounded px-1 py-1 outline-none focus:border-gold/50" />
-        <span className="text-white/30">–</span>
-        <input type="number" value={b} onChange={(e) => setB(e.target.value)} onBlur={() => onSave(match, a, b)} className="w-14 text-center bg-black/20 border border-white/10 rounded px-1 py-1 outline-none focus:border-gold/50" />
-        <span className="flex-1 truncate text-left">{teamB?.name || "—"}</span>
-        <button onClick={() => onDelete(match.id)} className="text-red-400/60 hover:text-red-400 text-xs">حذف</button>
+    <div className={`rounded-3xl border-2 p-4 sm:p-6 mb-5 ${live ? "border-red-500/60 bg-gradient-to-b from-red-950/30 to-transparent shadow-[0_0_35px_rgba(239,68,68,0.18)]" : "border-white/10 bg-black/20"}`}>
+      <div className="flex items-center justify-between mb-4">
+        <span className={`text-xs sm:text-sm px-3 py-1 rounded-full font-bold ${live ? "bg-red-500/20 text-red-300 animate-pulse" : match.played ? "bg-green-500/15 text-green-300" : "bg-white/10 text-white/50"}`}>
+          {live ? "🔴 مباشر الآن" : match.played ? "✅ انتهت / مسجّلة" : "🕐 لم تبدأ بعد"}
+        </span>
+        <button onClick={() => onDelete(match.id)} className="text-red-400/60 hover:text-red-400 text-xs">🗑 حذف المباراة</button>
       </div>
-      {onSaveDateTime && <MatchDateTimeInputs match={match} onSave={onSaveDateTime} />}
+
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-6">
+        <div className="text-center min-w-0">
+          <p className="font-brand text-xl sm:text-4xl text-white leading-tight break-words">{teamA?.name || "—"}</p>
+          <div className="flex justify-center gap-2 mt-3">
+            <button onClick={() => bump("A", -1)} className={stepCls}>−</button>
+            <button onClick={() => bump("A", 1)} className={stepCls}>+</button>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 sm:gap-3">
+          <input type="number" value={a} onChange={(e) => setA(e.target.value)} onBlur={() => onSave(match, a, b)} className={scoreCls} />
+          <span className="text-3xl text-white/30">:</span>
+          <input type="number" value={b} onChange={(e) => setB(e.target.value)} onBlur={() => onSave(match, a, b)} className={scoreCls} />
+        </div>
+        <div className="text-center min-w-0">
+          <p className="font-brand text-xl sm:text-4xl text-white leading-tight break-words">{teamB?.name || "—"}</p>
+          <div className="flex justify-center gap-2 mt-3">
+            <button onClick={() => bump("B", -1)} className={stepCls}>−</button>
+            <button onClick={() => bump("B", 1)} className={stepCls}>+</button>
+          </div>
+        </div>
+      </div>
+
       {onSaveClock && <MatchClockControls match={match} onSaveClock={onSaveClock} />}
-      {onSaveDetails && (
-        <MatchDetailsPanel
-          match={match}
-          teamA={teamA}
-          teamB={teamB}
-          onSaveDetails={onSaveDetails}
-        />
+
+      {isTie && (
+        <div className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-200 flex items-center gap-2 flex-wrap">
+          تعادل — حدّد المتأهل:
+          <button onClick={() => onSetWinner(match, match.teamA)} className={`px-4 py-2 rounded-lg border ${match.winner === match.teamA ? "bg-gold/90 text-black border-gold" : "border-white/25"}`}>{teamA?.name}</button>
+          <button onClick={() => onSetWinner(match, match.teamB)} className={`px-4 py-2 rounded-lg border ${match.winner === match.teamB ? "bg-gold/90 text-black border-gold" : "border-white/25"}`}>{teamB?.name}</button>
+        </div>
       )}
+      {knockout && match.winner && !isTie && <p className="mb-3 text-sm text-green-300/80">المتأهل: {match.winner === match.teamA ? teamA?.name : teamB?.name}</p>}
+
+      {onSaveDetails && <MatchDetailsPanel match={match} teamA={teamA} teamB={teamB} onSaveDetails={onSaveDetails} />}
+      {onSaveDateTime && <MatchDateTimeInputs match={match} onSave={onSaveDateTime} />}
     </div>
   );
 }
@@ -851,6 +887,7 @@ function MatchClockControls({ match, onSaveClock }) {
   const mm = Math.floor(remainingSeconds / 60).toString().padStart(2, "0");
   const ss = Math.floor(remainingSeconds % 60).toString().padStart(2, "0");
   const urgent = clock.running && remainingSeconds <= 60 && remainingSeconds > 0;
+  const pct = totalSeconds ? Math.min(100, ((totalSeconds - remainingSeconds) / totalSeconds) * 100) : 0;
 
   // إيقاف تلقائي فور وصول العدّاد للصفر — بدون أي تدخل من المشرف
   useEffect(() => {
@@ -879,51 +916,41 @@ function MatchClockControls({ match, onSaveClock }) {
   }
 
   const notStarted = !clock.running && remainingSeconds === totalSeconds;
+  const big = "px-5 py-3 rounded-xl text-base font-bold border-2 active:scale-95 transition";
 
   return (
-    <div className="mt-1.5">
-      <div className="flex items-center gap-2 flex-wrap">
+    <div className="my-5 rounded-2xl bg-black/35 border border-white/10 p-4 sm:p-5">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <span
-          className={`font-display text-xl tabular-nums px-2 rounded transition-colors ${
-            isFinished
-              ? "text-red-400 bg-red-500/10"
-              : urgent
-              ? "text-red-300 animate-pulse"
-              : clock.running
-              ? "text-green-400"
-              : "text-gold2"
+          className={`font-display tabular-nums text-6xl sm:text-7xl leading-none ${
+            isFinished ? "text-red-400" : urgent ? "text-red-300 animate-pulse" : clock.running ? "text-green-400" : "text-gold2"
           }`}
         >
-          ⏱ {mm}:{ss}
+          {mm}:{ss}
         </span>
-        {isFinished && <span className="text-[11px] text-red-300 font-semibold">⏰ انتهى الوقت!</span>}
-        {!clock.running ? (
-          <button
-            onClick={start}
-            disabled={remainingSeconds <= 0}
-            className="text-[11px] px-2 py-1 rounded bg-green-500/20 text-green-300 border border-green-500/40 hover:bg-green-500/30 disabled:opacity-30"
-          >
-            ▶ {remainingSeconds < totalSeconds && remainingSeconds > 0 ? "استئناف" : "ابدأ"}
-          </button>
-        ) : (
-          <button onClick={pause} className="text-[11px] px-2 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30">
-            ⏸ إيقاف مؤقت
-          </button>
-        )}
-        <button onClick={reset} className="text-[11px] px-2 py-1 rounded border border-white/15 text-white/50 hover:bg-white/5">
-          ↺ إعادة ضبط
-        </button>
+        <div className="flex gap-2 flex-wrap">
+          {!clock.running ? (
+            <button onClick={start} disabled={remainingSeconds <= 0} className={`${big} bg-green-500/20 text-green-300 border-green-500/50 hover:bg-green-500/30 disabled:opacity-30`}>
+              ▶ {remainingSeconds < totalSeconds && remainingSeconds > 0 ? "استئناف" : "ابدأ المباراة"}
+            </button>
+          ) : (
+            <button onClick={pause} className={`${big} bg-amber-500/20 text-amber-300 border-amber-500/50 hover:bg-amber-500/30`}>⏸ إيقاف مؤقت</button>
+          )}
+          <button onClick={reset} className={`${big} border-white/20 text-white/60 hover:bg-white/5`}>↺ إعادة ضبط</button>
+        </div>
       </div>
+      <div className="h-2.5 rounded-full bg-white/10 mt-4 overflow-hidden">
+        <div className={`h-full rounded-full transition-all duration-1000 ${clock.running ? "bg-green-400" : "bg-gold/70"}`} style={{ width: `${pct}%` }} />
+      </div>
+      {isFinished && <p className="text-red-300 font-bold mt-3">⏰ انتهى الوقت!</p>}
       {notStarted && (
-        <div className="flex items-center gap-1 flex-wrap mt-1.5">
-          <span className="text-[10px] text-white/30 ml-1">مدة المباراة:</span>
+        <div className="flex items-center gap-2 flex-wrap mt-4">
+          <span className="text-xs text-white/40">مدة المباراة:</span>
           {CLOCK_PRESETS.map((m) => (
             <button
               key={m}
               onClick={() => setDuration(m)}
-              className={`text-[10px] px-1.5 py-0.5 rounded border ${
-                totalSeconds === m * 60 ? "bg-gold/80 text-black border-gold" : "border-white/15 text-white/50 hover:bg-white/5"
-              }`}
+              className={`text-sm px-3 py-1.5 rounded-lg border ${totalSeconds === m * 60 ? "bg-gold/90 text-black border-gold font-bold" : "border-white/20 text-white/60 hover:bg-white/5"}`}
             >
               {m}′
             </button>
@@ -940,21 +967,21 @@ function MatchDateTimeInputs({ match, onSave }) {
   const [time, setTime] = useState(match.time || "");
   const [venue, setVenue] = useState(match.venue || "");
   return (
-    <div className="flex flex-wrap items-center gap-2 mt-1.5">
+    <div className="flex flex-wrap items-center gap-2 mt-4">
       <span className="text-[11px] text-white/40">📅</span>
       <input
         type="date"
         value={date}
         onChange={(e) => setDate(e.target.value)}
         onBlur={() => onSave(match.id, date, time, venue)}
-        className="bg-black/20 border border-white/10 rounded px-2 py-1 text-xs outline-none focus:border-gold/50 [color-scheme:dark]"
+        className="bg-black/20 border border-white/10 rounded px-3 py-2 text-sm outline-none focus:border-gold/50 [color-scheme:dark]"
       />
       <input
         type="time"
         value={time}
         onChange={(e) => setTime(e.target.value)}
         onBlur={() => onSave(match.id, date, time, venue)}
-        className="bg-black/20 border border-white/10 rounded px-2 py-1 text-xs outline-none focus:border-gold/50 [color-scheme:dark]"
+        className="bg-black/20 border border-white/10 rounded px-3 py-2 text-sm outline-none focus:border-gold/50 [color-scheme:dark]"
       />
       <span className="text-[11px] text-white/40">📍</span>
       <input
@@ -962,7 +989,7 @@ function MatchDateTimeInputs({ match, onSave }) {
         onChange={(e) => setVenue(e.target.value)}
         onBlur={() => onSave(match.id, date, time, venue)}
         placeholder="الملعب"
-        className="bg-black/20 border border-white/10 rounded px-2 py-1 text-xs outline-none focus:border-gold/50 w-28"
+        className="bg-black/20 border border-white/10 rounded px-3 py-2 text-sm outline-none focus:border-gold/50 w-36"
       />
     </div>
   );
@@ -970,7 +997,7 @@ function MatchDateTimeInputs({ match, onSave }) {
 
 /* ---------------- تفاصيل المباراة: أهداف بالدقيقة + إنذارات + ملاحظات ---------------- */
 function MatchDetailsPanel({ match, teamA, teamB, onSaveDetails }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(!!match.clock?.running);
   const [events, setEvents] = useState(match.events || []);
   const [notes, setNotes] = useState(match.notes || "");
   const [motm, setMotm] = useState(match.motm || null);
@@ -989,13 +1016,13 @@ function MatchDetailsPanel({ match, teamA, teamB, onSaveDetails }) {
     scoreRef.current = { A: match.scoreA ?? 0, B: match.scoreB ?? 0 };
   }, [match.scoreA, match.scoreB]);
 
-  function quickAdd(side, type, playerId) {
+  function quickAdd(side, type, playerId, assistId) {
     const minute = Math.max(1, Math.ceil(elapsedMinutes));
     const mk = (t, extra = {}) => ({
       id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       side, type: t, playerId, minute, ...extra,
     });
-    const added = [mk(type, type === "red" ? { suspensionMinutes: 5 } : {})];
+    const added = [mk(type, type === "red" ? { suspensionMinutes: 5 } : type === "goal" && assistId ? { assistId } : {})];
     let msg = { goal: "⚽ هدف!", save: "🧤 تصدٍّ", yellow: "🟨 إنذار", red: "🟥 طرد" }[type] || "تمت الإضافة";
     // إنذار ثانٍ لنفس اللاعب = طرد تلقائي
     const hadYellow = events.some((e) => e.type === "yellow" && e.side === side && e.playerId === playerId);
@@ -1049,7 +1076,7 @@ function MatchDetailsPanel({ match, teamA, teamB, onSaveDetails }) {
 
   if (!open) {
     return (
-      <button onClick={() => setOpen(true)} className="text-[11px] text-gold2/70 hover:text-gold2 mt-1.5">
+      <button onClick={() => setOpen(true)} className="w-full py-3 rounded-xl border-2 border-gold/30 bg-gold/5 text-gold2 text-sm font-bold hover:bg-gold/10 transition">
         📋 تفاصيل المباراة {goalsCount > 0 || cardsCount > 0 ? `(⚽ ${goalsCount} · 🟨 ${cardsCount})` : ""}
       </button>
     );
@@ -1062,8 +1089,8 @@ function MatchDetailsPanel({ match, teamA, teamB, onSaveDetails }) {
   ];
 
   return (
-    <div className="mt-2 bg-black/20 rounded-lg p-3 space-y-3">
-      <div className="grid sm:grid-cols-2 gap-3">
+    <div className="mt-3 bg-black/20 rounded-2xl p-3 sm:p-4 space-y-4">
+      <div className="grid lg:grid-cols-2 gap-4">
         <EventSide label={teamA?.name} side="A" players={playersA} events={sorted} allEvents={events} onAdd={quickAdd} onChange={updateEvent} onRemove={removeEvent} elapsedMinutes={elapsedMinutes} />
         <EventSide label={teamB?.name} side="B" players={playersB} events={sorted} allEvents={events} onAdd={quickAdd} onChange={updateEvent} onRemove={removeEvent} elapsedMinutes={elapsedMinutes} />
       </div>
@@ -1161,67 +1188,76 @@ function LineupSide({ label, players, lineup, onToggle }) {
 
 function EventSide({ label, side, players, allEvents, onAdd, onChange, onRemove, elapsedMinutes = 0 }) {
   const [pid, setPid] = useState(players[0]?.id || "");
+  const [aid, setAid] = useState("");
   const curPid = players.some((p) => p.id === pid) ? pid : players[0]?.id || "";
-  const rows = allEvents
-    .map((e, i) => ({ e, i }))
-    .filter(({ e }) => e.side === side);
+  const rows = allEvents.map((e, i) => ({ e, i })).filter(({ e }) => e.side === side);
+  const accent = side === "A" ? "border-gold/40" : "border-sky-400/40";
+  const sel = "w-full bg-black/40 border border-white/15 rounded-xl px-3 py-3 text-base outline-none focus:border-gold/60";
+  const btn = "h-14 rounded-xl text-base font-bold border-2 active:scale-95 transition";
 
   if (players.length === 0) {
     return (
-      <div>
-        <p className="text-xs text-white/50 mb-1">{label}</p>
-        <p className="text-[11px] text-white/30">لا لاعبون مسجّلون — سجّلهم من تبويب "اللاعبون".</p>
+      <div className={`rounded-2xl border-2 ${accent} p-4`}>
+        <p className="font-brand text-xl text-white mb-1">{label}</p>
+        <p className="text-xs text-white/40">لا لاعبون مسجّلون — سجّلهم من تبويب "اللاعبون".</p>
       </div>
     );
   }
 
   return (
-    <div>
-      <p className="text-xs text-white/50 mb-1">{label}</p>
-      <div className="space-y-1 mb-1.5">
-        {rows.map(({ e, i }) => (
-          <div key={e.id} className="flex items-center gap-1 flex-wrap">
-            <span className="w-5 text-center text-xs">{e.type === "goal" ? "⚽" : e.type === "save" ? "🧤" : e.type === "yellow" ? "🟨" : "🟥"}</span>
-            <select value={e.playerId} onChange={(ev) => onChange(i, { playerId: ev.target.value })} className="flex-1 bg-black/30 border border-white/10 rounded px-1.5 py-1 text-xs outline-none focus:border-gold/50">
-              {players.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-            <input
-              type="number"
-              min="1"
-              max="130"
-              value={e.minute}
-              onChange={(ev) => onChange(i, { minute: ev.target.value })}
-              placeholder="د"
-              className="w-11 text-center bg-black/30 border border-white/10 rounded px-1 py-1 text-xs outline-none focus:border-gold/50"
-            />
-            {e.type === "red" && (
-              <>
-                <input
-                  type="number"
-                  min="1"
-                  value={e.suspensionMinutes ?? 5}
-                  onChange={(ev) => onChange(i, { suspensionMinutes: Number(ev.target.value) })}
-                  title="مدة الطرد بالدقائق"
-                  className="w-11 text-center bg-black/30 border border-red-500/30 rounded px-1 py-1 text-[11px] outline-none focus:border-red-400"
-                />
-                <RedCardCountdown minute={e.minute} suspensionMinutes={e.suspensionMinutes ?? 5} elapsedMinutes={elapsedMinutes} />
-              </>
-            )}
-            <button onClick={() => onRemove(i)} className="text-red-400/60 hover:text-red-400 text-xs">×</button>
-          </div>
-        ))}
-      </div>
-      <div className="mt-2 rounded-lg border border-gold/20 bg-gold/5 p-2">
-        <p className="text-[10px] text-white/40 mb-1">⚡ حدث فوري — اختر اللاعب ثم اضغط (يُحفظ ويظهر للزوار فورًا)</p>
-        <select value={curPid} onChange={(ev) => setPid(ev.target.value)} className="w-full mb-1.5 bg-black/30 border border-white/10 rounded px-1.5 py-1.5 text-xs outline-none focus:border-gold/50">
+    <div className={`rounded-2xl border-2 ${accent} bg-black/25 p-3 sm:p-4`}>
+      <p className="font-brand text-xl sm:text-2xl text-white mb-3">{label}</p>
+
+      <div className="rounded-xl bg-gold/5 border border-gold/25 p-3 mb-4 space-y-2">
+        <p className="text-xs text-gold2/80">⚡ حدث فوري — يُحفظ ويظهر للزوار مباشرة (الدقيقة من ساعة المباراة)</p>
+        <select value={curPid} onChange={(ev) => setPid(ev.target.value)} className={sel}>
           {players.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
-        <div className="grid grid-cols-4 gap-1 text-[11px]">
-          <button onClick={() => onAdd(side, "goal", curPid)} className="py-1.5 rounded bg-gold/20 text-gold2 border border-gold/40 hover:bg-gold/30">⚽ هدف</button>
-          <button onClick={() => onAdd(side, "save", curPid)} className="py-1.5 rounded bg-blue-400/15 text-blue-300 border border-blue-400/30 hover:bg-blue-400/25">🧤 تصدي</button>
-          <button onClick={() => onAdd(side, "yellow", curPid)} className="py-1.5 rounded bg-yellow-300/15 text-yellow-300 border border-yellow-300/30 hover:bg-yellow-300/25">🟨 إنذار</button>
-          <button onClick={() => onAdd(side, "red", curPid)} className="py-1.5 rounded bg-red-500/15 text-red-300 border border-red-500/30 hover:bg-red-500/25">🟥 طرد</button>
+        <select value={aid} onChange={(ev) => setAid(ev.target.value)} className={sel}>
+          <option value="">🅰️ بدون تمريرة حاسمة (للأهداف)</option>
+          {players.filter((p) => p.id !== curPid).map((p) => <option key={p.id} value={p.id}>🅰️ {p.name}</option>)}
+        </select>
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <button onClick={() => { onAdd(side, "goal", curPid, aid); setAid(""); }} className={`${btn} bg-gold/20 text-gold2 border-gold/50 hover:bg-gold/30`}>⚽ هدف</button>
+          <button onClick={() => onAdd(side, "save", curPid)} className={`${btn} bg-blue-400/15 text-blue-300 border-blue-400/40 hover:bg-blue-400/25`}>🧤 تصدٍّ</button>
+          <button onClick={() => onAdd(side, "yellow", curPid)} className={`${btn} bg-yellow-300/15 text-yellow-300 border-yellow-300/40 hover:bg-yellow-300/25`}>🟨 إنذار</button>
+          <button onClick={() => onAdd(side, "red", curPid)} className={`${btn} bg-red-500/15 text-red-300 border-red-500/40 hover:bg-red-500/25`}>🟥 طرد</button>
         </div>
+      </div>
+
+      <p className="text-xs text-white/40 mb-2">سجلّ الأحداث ({rows.length})</p>
+      <div className="space-y-2">
+        {rows.length === 0 && <p className="text-white/25 text-sm">لا أحداث بعد.</p>}
+        {rows.map(({ e, i }) => (
+          <div key={e.id} className="rounded-xl border border-white/10 bg-black/30 p-2.5">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl w-8 text-center">{e.type === "goal" ? "⚽" : e.type === "save" ? "🧤" : e.type === "yellow" ? "🟨" : "🟥"}</span>
+              <select value={e.playerId} onChange={(ev) => onChange(i, { playerId: ev.target.value })} className="flex-1 min-w-0 bg-black/40 border border-white/15 rounded-lg px-2 py-2 text-sm outline-none focus:border-gold/50">
+                {players.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <input
+                type="number" min="1" max="130" value={e.minute}
+                onChange={(ev) => onChange(i, { minute: ev.target.value })}
+                placeholder="د"
+                className="w-14 text-center bg-black/40 border border-white/15 rounded-lg px-1 py-2 text-sm outline-none focus:border-gold/50"
+              />
+              <button onClick={() => onRemove(i)} className="w-9 h-9 rounded-lg text-red-400/70 hover:text-red-400 hover:bg-red-500/10 text-lg">×</button>
+            </div>
+            {e.type === "goal" && (
+              <select value={e.assistId || ""} onChange={(ev) => onChange(i, { assistId: ev.target.value || undefined })} className="mt-2 w-full bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white/70 outline-none">
+                <option value="">🅰️ بدون تمريرة حاسمة</option>
+                {players.filter((p) => p.id !== e.playerId).map((p) => <option key={p.id} value={p.id}>🅰️ {p.name}</option>)}
+              </select>
+            )}
+            {e.type === "red" && (
+              <div className="flex items-center gap-2 mt-2">
+                <span className="text-[11px] text-white/40">مدة الطرد (د):</span>
+                <input type="number" min="1" value={e.suspensionMinutes ?? 5} onChange={(ev) => onChange(i, { suspensionMinutes: Number(ev.target.value) })} className="w-14 text-center bg-black/40 border border-red-500/30 rounded-lg px-1 py-1 text-sm outline-none" />
+                <RedCardCountdown minute={e.minute} suspensionMinutes={e.suspensionMinutes ?? 5} elapsedMinutes={elapsedMinutes} />
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1390,37 +1426,21 @@ function KnockoutTab({ data, refresh, flash, celebrate }) {
           <div key={roundLabel} className="glass-card rounded-2xl p-6">
             <h3 className="font-display text-2xl text-gold2 mb-4">{roundLabel}</h3>
             <div className="space-y-2">
-              {knockoutMatches.filter((m) => m.round === roundLabel).map((m) => {
-                const isTie = m.played && m.scoreA !== null && m.scoreA === m.scoreB;
-                return (
-                  <div key={m.id} className="rounded-lg border border-white/10 px-3 py-2">
-                    <div className="flex items-center gap-3 text-sm">
-                      <span className="flex-1 truncate">{teamById[m.teamA]?.name || "—"}</span>
-                      <ScoreInput match={m} side="A" onSave={saveScore} />
-                      <span className="text-white/30">–</span>
-                      <ScoreInput match={m} side="B" onSave={saveScore} />
-                      <span className="flex-1 truncate text-left">{teamById[m.teamB]?.name || "—"}</span>
-                      <button onClick={() => deleteMatch(m.id)} className="text-red-400/60 hover:text-red-400 text-xs">حذف</button>
-                    </div>
-                    <MatchDateTimeInputs match={m} onSave={saveDateTime} />
-                    <MatchClockControls match={m} onSaveClock={saveClock} />
-                    {isTie && (
-                      <div className="mt-2 text-xs text-amber-300/80 flex items-center gap-2">
-                        تعادل — حدد الفائز يدويًا:
-                        <button onClick={() => setWinnerManually(m, m.teamA)} className={`px-2 py-1 rounded border ${m.winner === m.teamA ? "bg-gold/90 text-black border-gold" : "border-white/20"}`}>{teamById[m.teamA]?.name}</button>
-                        <button onClick={() => setWinnerManually(m, m.teamB)} className={`px-2 py-1 rounded border ${m.winner === m.teamB ? "bg-gold/90 text-black border-gold" : "border-white/20"}`}>{teamById[m.teamB]?.name}</button>
-                      </div>
-                    )}
-                    {m.winner && !isTie && <p className="mt-1 text-xs text-green-300/70">المتأهل: {teamById[m.winner]?.name}</p>}
-                    <MatchDetailsPanel
-                      match={m}
-                      teamA={teamById[m.teamA]}
-                      teamB={teamById[m.teamB]}
-                      onSaveDetails={saveDetails}
-                    />
-                  </div>
-                );
-              })}
+              {knockoutMatches.filter((m) => m.round === roundLabel).map((m) => (
+                <MatchRow
+                  key={m.id}
+                  match={m}
+                  teamA={teamById[m.teamA]}
+                  teamB={teamById[m.teamB]}
+                  onSave={saveScore}
+                  onDelete={deleteMatch}
+                  onSaveDateTime={saveDateTime}
+                  onSaveDetails={saveDetails}
+                  onSaveClock={saveClock}
+                  knockout
+                  onSetWinner={setWinnerManually}
+                />
+              ))}
             </div>
           </div>
         ))
@@ -1573,6 +1593,17 @@ function PlayersTab({ data, refresh, flash }) {
     }
   }
 
+  // مركز اللاعب يُستخدم في بطاقات FIFA والأوسمة (Iron Wall) ونقاط الفانتازي
+  async function setPos(teamId, playerId, pos) {
+    const team = data.teams.find((t) => t.id === teamId);
+    try {
+      await callApi(`/api/teams/${teamId}`, "PUT", { players: (team.players || []).map((p) => (p.id === playerId ? { ...p, pos } : p)) });
+      await refresh();
+    } catch (e) {
+      flash(e.message, true);
+    }
+  }
+
   if (data.teams.length === 0) {
     return <div className="glass-card rounded-2xl p-8 text-center text-white/50">أضف فرقًا أولًا من تبويب "الفرق" حتى تستطيع تسجيل لاعبيها.</div>;
   }
@@ -1592,6 +1623,7 @@ function PlayersTab({ data, refresh, flash }) {
             onAdd={addPlayer}
             onRemove={removePlayer}
             onSetCaptain={setCaptain}
+            onSetPos={setPos}
           />
         ))}
       </div>
@@ -1599,7 +1631,7 @@ function PlayersTab({ data, refresh, flash }) {
   );
 }
 
-function TeamPlayersCard({ team, goalsByPlayerId, onAdd, onRemove, onSetCaptain }) {
+function TeamPlayersCard({ team, goalsByPlayerId, onAdd, onRemove, onSetCaptain, onSetPos }) {
   const [name, setName] = useState("");
   return (
     <div className="glass-card rounded-2xl p-5">
@@ -1618,6 +1650,13 @@ function TeamPlayersCard({ team, goalsByPlayerId, onAdd, onRemove, onSetCaptain 
                 {goalsByPlayerId[p.id] > 0 && (
                   <span className="text-xs text-gold2 font-display text-base">⚽ {goalsByPlayerId[p.id]}</span>
                 )}
+                <select value={p.pos || ""} onChange={(e) => onSetPos(team.id, p.id, e.target.value)} className="bg-black/40 border border-white/15 rounded px-1 py-1 text-[11px] outline-none" title="مركز اللاعب">
+                  <option value="">المركز؟</option>
+                  <option value="GK">🧤 حارس</option>
+                  <option value="DEF">🛡️ مدافع</option>
+                  <option value="MID">🎯 وسط</option>
+                  <option value="FWD">⚽ مهاجم</option>
+                </select>
                 <button
                   onClick={() => onSetCaptain(team.id, team.captainId === p.id ? null : p.id)}
                   className={`text-xs ${team.captainId === p.id ? "text-gold2" : "text-white/30 hover:text-gold2"}`}
