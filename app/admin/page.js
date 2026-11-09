@@ -884,6 +884,7 @@ const CLOCK_PRESETS = [5, 10, 15, 20, 25, 30, 45, 90];
 function MatchClockControls({ match, onSaveClock }) {
   const { clock, remainingSeconds, totalSeconds, isFinished } = useMatchClock(match);
   const finishedNotified = useRef(false);
+  const [customMin, setCustomMin] = useState("");
   const mm = Math.floor(remainingSeconds / 60).toString().padStart(2, "0");
   const ss = Math.floor(remainingSeconds % 60).toString().padStart(2, "0");
   const urgent = clock.running && remainingSeconds <= 60 && remainingSeconds > 0;
@@ -955,6 +956,31 @@ function MatchClockControls({ match, onSaveClock }) {
               {m}′
             </button>
           ))}
+          <span className="flex items-center gap-1">
+            <input
+              type="number"
+              min="1"
+              max="300"
+              inputMode="numeric"
+              value={customMin}
+              onChange={(e) => setCustomMin(e.target.value)}
+              placeholder="مخصص"
+              className="w-20 text-xs sm:text-sm text-center px-2 py-1 sm:py-1.5 rounded-lg bg-black/40 border border-white/20 outline-none focus:border-gold/60"
+            />
+            <button
+              onClick={() => {
+                const n = Math.round(Number(customMin));
+                if (n >= 1 && n <= 300) {
+                  setDuration(n);
+                  setCustomMin("");
+                }
+              }}
+              disabled={!(Number(customMin) >= 1)}
+              className="text-xs sm:text-sm px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-gold/40 text-gold2 hover:bg-gold/10 disabled:opacity-30"
+            >
+              تطبيق ′
+            </button>
+          </span>
         </div>
       )}
     </div>
