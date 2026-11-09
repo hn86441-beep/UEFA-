@@ -10,6 +10,8 @@ import {
   isAuthedFromCookieHeader,
   withLock,
   getPublicSounds,
+  getSnapshots,
+  snapshotData,
 } from "../../../lib/server";
 import {
   uid,
@@ -47,6 +49,20 @@ async function requireAuth(req, seg) {
   const authed = await isAuthedFromCookieHeader(req.headers.get("cookie") || "");
   if (!authed) return fail("غير مصرح لك. سجّل الدخول كمشرف.", 401);
   return null; // مصرح له
+}
+
+// يتحقق من ملف نسخة احتياطية ويعيده بصيغة بيانات الدوري (أو null إن كان غير صالح)
+function normalizeBackup(raw) {
+  const d = raw && typeof raw === "object" && raw.data && typeof raw.data === "object" ? raw.data : raw;
+  if (!d || typeof d !== "object") return null;
+  if (!Array.isArray(d.teams) || !Array.isArray(d.groups) || !Array.isArray(d.matches)) return null;
+  const base = defaultData();
+  return {
+    ...base,
+    ...d,
+    settings: { ...base.settings, ...(d.settings || {}) },
+    archives: Array.isArray(d.archives) ? d.archives : [],
+  };
 }
 
 /* =========================== GET =========================== */
@@ -88,6 +104,28 @@ async function handleGET(req, { params }) {
       { ...data, settings: { ...data.settings, soundClips: undefined }, soundsVersion: version, soundTypes: types },
       { headers: { "Cache-Control": "public, s-maxage=2, stale-while-revalidate=5" } }
     );
+  }
+  // ---- النسخ الاحتياطي (للمشرف فقط) ----
+  if (seg === "backup" || seg === "backup/snapshots") {
+    const authFail = await requireAuth(req, seg);
+    if (authFail) return authFail;
+    if (seg === "backup/snapshots") {
+      const list = await getSnapshots();
+      return ok(
+        list.map((s) => ({
+          id: s.id,
+          t: s.t,
+          label: s.label,
+          teams: s.data?.teams?.length || 0,
+          matches: s.data?.matches?.length || 0,
+        })),
+        { headers: { "Cache-Control": "no-store" } }
+      );
+    }
+    const data = await getData();
+    const out = { app: "league-champions", version: 1, exportedAt: new Date().toISOString(), data };
+    if (new URL(req.url).searchParams.get("sounds") === "1") out.sounds = await getSoundClips();
+    return ok(out, { headers: { "Cache-Control": "no-store" } });
   }
   if (seg === "auth/check") {
     const authed = await isAuthedFromCookieHeader(req.headers.get("cookie") || "");
@@ -175,6 +213,29 @@ async function handlePOST(req, { params }) {
   }
 
   const body = await readBody(req);
+
+  // ---- استعادة نسخة احتياطية (ملف) أو لقطة تلقائية ----
+  if (seg === "backup/restore") {
+    const clean = normalizeBackup(body.backup || body);
+    if (!clean) return fail("ملف النسخة غير صالح (يجب أن يحتوي teams وgroups وmatches)");
+    await snapshotData("قبل استعادة نسخة", { force: true });
+    await saveData(clean);
+    const sounds = body.backup?.sounds || body.sounds;
+    if (sounds && typeof sounds === "object" && Object.keys(sounds).length) {
+      await saveSoundClips(sounds);
+    }
+    return ok({ ok: true, teams: clean.teams.length, matches: clean.matches.length });
+  }
+  if (seg === "backup/restore-snapshot") {
+    const list = await getSnapshots();
+    const snap = list.find((s) => s.id === body.id);
+    if (!snap) return fail("اللقطة غير موجودة", 404);
+    const clean = normalizeBackup(snap.data);
+    if (!clean) return fail("اللقطة تالفة", 500);
+    await snapshotData("قبل استعادة لقطة", { force: true });
+    await saveData(clean);
+    return ok({ ok: true });
+  }
 
   // ---- تسجيل الدخول / الخروج ----
   if (seg === "auth/login") {
@@ -283,6 +344,7 @@ async function handlePOST(req, { params }) {
     if (data.teams.length < data.groups.length)
       return fail("عدد الفرق أقل من عدد المجموعات");
 
+    await snapshotData("قبل قرعة المجموعات", { force: true });
     const assignment = drawGroups(data.teams, data.groups);
     data.teams = data.teams.map((t) => ({ ...t, group: assignment[t.id] || null }));
     data.groups = data.groups.map((g) => ({
@@ -333,6 +395,7 @@ async function handlePOST(req, { params }) {
   if (seg === "season/archive") {
     const data = await getData();
     if (data.teams.length === 0) return fail("لا يوجد شيء لأرشفته بعد");
+    await snapshotData("قبل أرشفة الموسم", { force: true });
     const archive = {
       id: uid("arc"),
       label: body.label?.trim() || data.settings?.season || "موسم",
@@ -351,6 +414,7 @@ async function handlePOST(req, { params }) {
 
   // ---- إعادة ضبط كاملة (مع الحفاظ على أرشيف المواسم السابقة) ----
   if (seg === "reset") {
+    await snapshotData("قبل إعادة الضبط", { force: true });
     const data = await getData();
     const fresh = defaultData();
     fresh.archives = data.archives || [];
@@ -464,6 +528,7 @@ async function handleDELETE(req, { params }) {
   }
 
   if (p[0] === "teams" && p.length === 2) {
+    await snapshotData("قبل حذف فريق");
     data.teams = data.teams.filter((t) => t.id !== p[1]);
     data.groups.forEach((g) => { g.teamIds = g.teamIds.filter((id) => id !== p[1]); });
     data.matches = data.matches.filter((m) => m.teamA !== p[1] && m.teamB !== p[1]);
@@ -472,6 +537,7 @@ async function handleDELETE(req, { params }) {
   }
 
   if (p[0] === "groups" && p.length === 2) {
+    await snapshotData("قبل حذف مجموعة");
     data.groups = data.groups.filter((g) => g.id !== p[1]);
     data.teams.forEach((t) => { if (t.group === p[1]) t.group = null; });
     data.matches = data.matches.filter((m) => m.group !== p[1]);
