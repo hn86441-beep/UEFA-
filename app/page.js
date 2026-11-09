@@ -8,6 +8,7 @@ import { useEventSounds } from "../lib/useEventSounds";
 import { LiveFlash, SoundToggle, eventText } from "../components/LiveBits";
 import { computeStandings, computeTopScorers, matchEventsTimeline, detectLeagueStage, computeRecordsBook } from "../lib/logic";
 import Link from "next/link";
+import UpcomingResults from "../components/UpcomingResults";
 
 const TABS = [
   { id: "standings", label: "الترتيب" },
@@ -88,8 +89,11 @@ function HomeInner() {
               {hasLiveMatch && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />}
               📺 {hasLiveMatch ? "المباراة المباشرة الآن" : "صفحة المباريات المباشرة"}
             </Link>
-            <SoundToggle on={soundOn} setOn={setSoundOn} needsUnlock={needsUnlock} unlock={unlock} hasClips={hasClips} test={test} status={status} />
+            <Link href="/tv" className="text-xs px-4 py-2 rounded-full border border-white/15 text-white/60 hover:text-white hover:bg-white/5 transition">🖥️ وضع الشاشة</Link>
+                        <SoundToggle on={soundOn} setOn={setSoundOn} needsUnlock={needsUnlock} unlock={unlock} hasClips={hasClips} test={test} status={status} />
           </div>
+
+          <UpcomingResults matches={matches} teamById={teamById} />
 
           {todaysMatches.length > 0 && (
             <TodaysMatchesBanner matches={todaysMatches} teamById={teamById} />
@@ -688,7 +692,7 @@ function MiniTable({ table }) {
           <tr key={t.id} className={i < 2 ? "text-white" : "text-white/60"}>
             <td className="py-1.5 flex items-center gap-2">
               <span className="w-4 text-gold2/70 text-xs">{i + 1}</span>
-              {t.name}
+              <Link href={`/team/${t.id}`} className="hover:text-gold2 transition">{t.name}</Link>
             </td>
             <td className="text-center">{t.played}</td>
             <td className="text-center font-display text-lg text-gold2">{t.points}</td>
@@ -720,7 +724,7 @@ export function FullTable({ teams }) {
         {teams.map((t, i) => (
           <tr key={t.id} className="border-t border-white/5">
             <td className="py-2 text-white/40">{i + 1}</td>
-            <td className="py-2 font-semibold">{t.name}</td>
+            <td className="py-2 font-semibold"><Link href={`/team/${t.id}`} className="hover:text-gold2 transition">{t.name}</Link></td>
             <td className="text-center">{t.played}</td>
             <td className="text-center">{t.won}</td>
             <td className="text-center">{t.drawn}</td>
