@@ -5,6 +5,40 @@ import Confetti from "../../components/Confetti";
 import { useLeagueData, callApi } from "../../lib/useLeagueData";
 import { computeStandings, computeTopScorers, findVenueConflict } from "../../lib/logic";
 
+
+/* ---------------- النسخ الاحتياطي: تنزيل / استعادة ---------------- */
+const BACKUP_TS_KEY = "cl_last_backup";
+function readLastBackup() {
+  try {
+    return Number(localStorage.getItem(BACKUP_TS_KEY)) || 0;
+  } catch {
+    return 0;
+  }
+}
+async function downloadBackup({ sounds = false } = {}) {
+  const res = await fetch(`/api/backup${sounds ? "?sounds=1" : ""}`, { cache: "no-store" });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(j.error || "تعذر إنشاء النسخة");
+  }
+  const blob = await res.blob();
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  const name = `league-backup-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.json`;
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  try {
+    localStorage.setItem(BACKUP_TS_KEY, String(Date.now()));
+  } catch {}
+  return name;
+}
+
 export default function AdminPage() {
   const [authState, setAuthState] = useState("checking"); // checking | out | in
 
@@ -182,7 +216,12 @@ function Dashboard({ onLoggedOut }) {
         <div className="mt-14 pt-6 border-t border-white/10">
           <button
             onClick={async () => {
-              if (!confirm("سيتم حذف كل الفرق والمجموعات والمباريات نهائيًا (سيبقى أرشيف المواسم السابقة كما هو). متأكد؟")) return;
+              if (!confirm("سيتم حذف كل الفرق والمجموعات والمباريات نهائيًا (سيبقى أرشيف المواسم السابقة كما هو). سيُنزَّل ملف نسخة احتياطية تلقائيًا قبل الحذف. متأكد؟")) return;
+              try {
+                await downloadBackup();
+              } catch (e) {
+                if (!confirm(`تعذر تنزيل نسخة احتياطية تلقائية (${e.message}). المتابعة بدونها؟`)) return;
+              }
               await callApi("/api/reset", "POST", {});
               await refresh();
               flash("تمت إعادة ضبط الدوري بالكامل");
@@ -258,7 +297,130 @@ function SettingsTab({ data, refresh, flash }) {
         </div>
       </div>
 
+      <BackupManager data={data} refresh={refresh} flash={flash} />
+
       <SoundClipsManager data={data} refresh={refresh} flash={flash} />
+    </div>
+  );
+}
+
+/* نسخ احتياطي: تنزيل ملف JSON، استعادة من ملف، واستعادة لقطات تلقائية أُخذت قبل العمليات الخطرة */
+function BackupManager({ data, refresh, flash }) {
+  const [busy, setBusy] = useState(false);
+  const [withSounds, setWithSounds] = useState(false);
+  const [snaps, setSnaps] = useState([]);
+  const [last, setLast] = useState(0);
+  const fileRef = useRef(null);
+
+  async function loadSnaps() {
+    try {
+      const res = await fetch("/api/backup/snapshots", { cache: "no-store" });
+      if (res.ok) setSnaps(await res.json());
+    } catch {}
+  }
+  useEffect(() => {
+    setLast(readLastBackup());
+    loadSnaps();
+  }, []);
+
+  async function doDownload() {
+    setBusy(true);
+    try {
+      const name = await downloadBackup({ sounds: withSounds });
+      setLast(Date.now());
+      flash(`تم تنزيل النسخة: ${name}`);
+    } catch (e) {
+      flash(e.message, true);
+    }
+    setBusy(false);
+  }
+
+  async function onFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy(true);
+    try {
+      const raw = JSON.parse(await file.text());
+      const d = raw?.data || raw;
+      if (!Array.isArray(d?.teams) || !Array.isArray(d?.groups) || !Array.isArray(d?.matches)) {
+        throw new Error("هذا ليس ملف نسخة احتياطية صالحًا");
+      }
+      const when = raw?.exportedAt ? new Date(raw.exportedAt).toLocaleString("ar") : "غير معروف";
+      if (!confirm(`استعادة النسخة؟\nتاريخها: ${when}\nفرق: ${d.teams.length} · مباريات: ${d.matches.length}\n\nسيتم استبدال بيانات الدوري الحالية بالكامل (وتُحفظ لقطة تلقائية للحالة الحالية قبل ذلك).`)) {
+        setBusy(false);
+        return;
+      }
+      await callApi("/api/backup/restore", "POST", { backup: raw });
+      await refresh();
+      await loadSnaps();
+      flash("✅ تمت استعادة النسخة الاحتياطية");
+    } catch (err) {
+      flash(err.message || "تعذرت الاستعادة", true);
+    }
+    setBusy(false);
+  }
+
+  async function restoreSnap(s) {
+    if (!confirm(`استعادة لقطة «${s.label}» (${new Date(s.t).toLocaleString("ar")})؟\nسيتم استبدال البيانات الحالية.`)) return;
+    setBusy(true);
+    try {
+      await callApi("/api/backup/restore-snapshot", "POST", { id: s.id });
+      await refresh();
+      await loadSnaps();
+      flash("✅ تمت استعادة اللقطة");
+    } catch (err) {
+      flash(err.message, true);
+    }
+    setBusy(false);
+  }
+
+  const days = last ? Math.floor((Date.now() - last) / 86400000) : null;
+  const stale = last === 0 || days >= 7;
+
+  return (
+    <div className="glass-card rounded-2xl p-4 sm:p-6 max-w-lg">
+      <h2 className="font-display text-xl sm:text-2xl text-gold2 mb-2">💾 النسخ الاحتياطي</h2>
+      <p className="text-white/50 text-sm mb-3">
+        نزّل نسخة من كل بيانات الدوري (فرق، مجموعات، مباريات، أحداث، أرشيف) واحتفظ بها على جهازك. يمكنك استعادتها في أي وقت.
+      </p>
+      <p className={`text-xs mb-3 ${stale ? "text-amber-300" : "text-green-300/80"}`}>
+        {last === 0 ? "⚠️ لم تنزّل نسخة من هذا الجهاز بعد." : days === 0 ? "✅ آخر نسخة من هذا الجهاز: اليوم." : `${stale ? "⚠️ " : ""}آخر نسخة من هذا الجهاز: قبل ${days} يوم.`}
+      </p>
+      <label className="flex items-center gap-2 text-xs text-white/50 mb-3">
+        <input type="checkbox" checked={withSounds} onChange={(e) => setWithSounds(e.target.checked)} />
+        تضمين المقاطع الصوتية (قد يكبر الملف؛ إن تجاوز نحو 4 ميجابايت فلن تنجح استعادته)
+      </label>
+      <div className="flex flex-wrap gap-2">
+        <button onClick={doDownload} disabled={busy} className="px-4 py-2.5 rounded-lg bg-gold/90 text-black font-semibold hover:bg-gold2 transition disabled:opacity-40">
+          ⬇️ تنزيل نسخة JSON
+        </button>
+        <button onClick={() => fileRef.current?.click()} disabled={busy} className="px-4 py-2.5 rounded-lg border border-gold/40 text-gold2 hover:bg-gold/10 transition disabled:opacity-40">
+          ⬆️ استعادة من ملف
+        </button>
+        <input ref={fileRef} type="file" accept="application/json,.json" onChange={onFile} className="hidden" />
+      </div>
+
+      <div className="mt-5 pt-4 border-t border-white/10">
+        <p className="text-sm text-white/70 mb-2">🕘 لقطات تلقائية (تُؤخذ قبل الحذف/القرعة/الأرشفة/الاستعادة)</p>
+        {snaps.length === 0 ? (
+          <p className="text-xs text-white/30">لا لقطات بعد.</p>
+        ) : (
+          <div className="space-y-2">
+            {snaps.map((s) => (
+              <div key={s.id} className="flex items-center justify-between gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs">
+                <span className="min-w-0">
+                  <span className="block text-white/80 truncate">{s.label}</span>
+                  <span className="block text-white/35">{new Date(s.t).toLocaleString("ar")} · {s.teams} فريق · {s.matches} مباراة</span>
+                </span>
+                <button onClick={() => restoreSnap(s)} disabled={busy} className="shrink-0 px-3 py-1.5 rounded-lg border border-amber-500/40 text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">
+                  استعادة
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1213,13 +1375,28 @@ function LineupSide({ label, players, lineup, onToggle }) {
 }
 
 function EventSide({ label, side, players, allEvents, onAdd, onChange, onRemove, elapsedMinutes = 0 }) {
-  const [pid, setPid] = useState(players[0]?.id || "");
+  // اختيار لاعب بنقرة واحدة ثم زر الحدث (يُصفَّر الاختيار بعد كل حدث لتفادي التكرار بالخطأ)
+  const [pid, setPid] = useState("");
   const [aid, setAid] = useState("");
-  const curPid = players.some((p) => p.id === pid) ? pid : players[0]?.id || "";
+  const [showAssist, setShowAssist] = useState(false);
+  const curPid = players.some((p) => p.id === pid) ? pid : "";
   const rows = allEvents.map((e, i) => ({ e, i })).filter(({ e }) => e.side === side);
   const accent = side === "A" ? "border-gold/40" : "border-sky-400/40";
-  const sel = "w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 sm:py-3 text-sm sm:text-base outline-none focus:border-gold/60";
-  const btn = "h-11 sm:h-14 rounded-xl text-sm sm:text-base font-bold border-2 active:scale-95 transition";
+  const btn = "h-14 sm:h-16 rounded-xl text-base sm:text-lg font-bold border-2 active:scale-95 transition disabled:opacity-30 disabled:active:scale-100";
+  const POS = { GK: "حارس", DEF: "مدافع", MID: "وسط", FWD: "مهاجم" };
+  const selected = players.find((p) => p.id === curPid);
+  const assistant = players.find((p) => p.id === aid);
+
+  function fire(type) {
+    if (!curPid) return;
+    try {
+      navigator.vibrate?.(type === "goal" ? [40, 30, 40] : 30);
+    } catch {}
+    onAdd(side, type, curPid, type === "goal" ? aid : undefined);
+    setPid("");
+    setAid("");
+    setShowAssist(false);
+  }
 
   if (players.length === 0) {
     return (
@@ -1234,20 +1411,59 @@ function EventSide({ label, side, players, allEvents, onAdd, onChange, onRemove,
     <div className={`rounded-2xl border-2 ${accent} bg-black/25 p-3 sm:p-4`}>
       <p className="font-brand text-lg sm:text-2xl text-white mb-2 sm:mb-3">{label}</p>
 
-      <div className="rounded-xl bg-gold/5 border border-gold/25 p-3 mb-4 space-y-2">
-        <p className="text-xs text-gold2/80">⚡ حدث فوري — يُحفظ ويظهر للزوار مباشرة (الدقيقة من ساعة المباراة)</p>
-        <select value={curPid} onChange={(ev) => setPid(ev.target.value)} className={sel}>
-          {players.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-        <select value={aid} onChange={(ev) => setAid(ev.target.value)} className={sel}>
-          <option value="">🅰️ بدون تمريرة حاسمة (للأهداف)</option>
-          {players.filter((p) => p.id !== curPid).map((p) => <option key={p.id} value={p.id}>🅰️ {p.name}</option>)}
-        </select>
-        <div className="grid grid-cols-2 gap-2 pt-1">
-          <button onClick={() => { onAdd(side, "goal", curPid, aid); setAid(""); }} className={`${btn} bg-gold/20 text-gold2 border-gold/50 hover:bg-gold/30`}>⚽ هدف</button>
-          <button onClick={() => onAdd(side, "save", curPid)} className={`${btn} bg-blue-400/15 text-blue-300 border-blue-400/40 hover:bg-blue-400/25`}>🧤 تصدٍّ</button>
-          <button onClick={() => onAdd(side, "yellow", curPid)} className={`${btn} bg-yellow-300/15 text-yellow-300 border-yellow-300/40 hover:bg-yellow-300/25`}>🟨 إنذار</button>
-          <button onClick={() => onAdd(side, "red", curPid)} className={`${btn} bg-red-500/15 text-red-300 border-red-500/40 hover:bg-red-500/25`}>🟥 طرد</button>
+      <div className="rounded-xl bg-gold/5 border border-gold/25 p-2.5 sm:p-3 mb-4 space-y-3">
+        <p className="text-xs text-gold2/80">⚡ ١) اضغط اللاعب  ←  ٢) اضغط الحدث (الدقيقة من ساعة المباراة)</p>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {players.map((p) => {
+            const on = p.id === curPid;
+            return (
+              <button
+                key={p.id}
+                onClick={() => setPid(on ? "" : p.id)}
+                className={`min-h-[52px] rounded-xl border-2 px-2 py-1.5 text-center active:scale-95 transition ${on ? "border-gold bg-gold/25 text-white shadow-[0_0_12px_rgba(212,175,55,.35)]" : "border-white/15 bg-black/30 text-white/80 hover:border-white/30"}`}
+              >
+                <span className="block text-sm sm:text-base font-semibold leading-tight truncate">{p.name}</span>
+                {p.pos && <span className="block text-[10px] text-white/40">{POS[p.pos] || p.pos}</span>}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={() => fire("goal")} disabled={!curPid} className={`${btn} bg-gold/20 text-gold2 border-gold/50 hover:bg-gold/30`}>⚽ هدف</button>
+          <button onClick={() => fire("save")} disabled={!curPid} className={`${btn} bg-blue-400/15 text-blue-300 border-blue-400/40 hover:bg-blue-400/25`}>🧤 تصدٍّ</button>
+          <button onClick={() => fire("yellow")} disabled={!curPid} className={`${btn} bg-yellow-300/15 text-yellow-300 border-yellow-300/40 hover:bg-yellow-300/25`}>🟨 إنذار</button>
+          <button onClick={() => fire("red")} disabled={!curPid} className={`${btn} bg-red-500/15 text-red-300 border-red-500/40 hover:bg-red-500/25`}>🟥 طرد</button>
+        </div>
+        <p className="text-[11px] text-center text-white/40 min-h-[16px]">
+          {selected ? `المحدد: ${selected.name}${assistant ? ` · 🅰️ ${assistant.name}` : ""}` : "لم يُحدَّد لاعب"}
+        </p>
+
+        <div>
+          <button
+            onClick={() => setShowAssist((v) => !v)}
+            disabled={!curPid}
+            className="w-full text-xs py-2 rounded-lg border border-white/15 text-white/60 hover:bg-white/5 disabled:opacity-30"
+          >
+            🅰️ {assistant ? `تمريرة حاسمة: ${assistant.name} (غيّر)` : "إضافة تمريرة حاسمة للهدف (اختياري)"} {showAssist ? "▲" : "▼"}
+          </button>
+          {showAssist && curPid && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 mt-2">
+              {players.filter((p) => p.id !== curPid).map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => {
+                    setAid(aid === p.id ? "" : p.id);
+                    setShowAssist(false);
+                  }}
+                  className={`min-h-[44px] rounded-lg border px-2 py-1 text-sm truncate ${aid === p.id ? "border-sky-400 bg-sky-400/20 text-white" : "border-white/15 bg-black/30 text-white/70"}`}
+                >
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
