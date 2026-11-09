@@ -53,6 +53,11 @@ export default function CalculatorPage() {
               <button onClick={clear} className="text-xs px-3 py-2 rounded-lg border border-white/15 text-white/60 hover:bg-white/5">↺ مسح الافتراضات{filled ? ` (${filled})` : ""}</button>
             </div>
 
+            <p className="text-[11px] text-white/40 text-center -mt-2 mb-5 leading-relaxed">
+              ملاحظة: الحساب يعتمد على النقاط فقط ولا يدخل فارق الأهداف. عند التعادل في النقاط يُعدّ الفريق قابلًا للّحاق به،
+              لذلك قد لا تظهر حالة «مؤهل رسميًا» حتى لو كان فارق الأهداف في صالحه.
+            </p>
+
             <div className="space-y-6">
               {groups.map((g) => {
                 const rows = simulateGroup(data.teams, data.matches, g.id, hypo, qualifyN);
